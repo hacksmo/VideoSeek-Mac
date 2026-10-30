@@ -109,11 +109,14 @@ V=~/.videoseek-venv/bin/python
 $V scripts/image_index.py add ~/Pictures/travel    # 登记目录
 $V scripts/image_index.py index                    # CLIP 向量 + VLM 描述
 $V scripts/image_index.py search "穿红裙的女人站在窗边"   # 语义
+$V scripts/image_index.py search "浅色衣服"              # 属性（颜色/体型/风格）
 $V scripts/image_index.py search "红裙" --mode keyword  # 关键词
 $V scripts/image_index.py search --mode image --image q.jpg  # 以图搜图
 ```
 
-检索按查询语言分流：**含汉字时先匹配文件名与描述文字**，命中不足才用 CLIP 向量补位；纯英文直接走语义。原因是默认 `openai-clip` 的文本塔只认英文，中文直连基本是噪声（`红酒瓶` 会返回表情包）。要按画面内容理解中文，得在设置里切 `chinese_clip_onnx` / `siglip2_onnx` 并重算索引，详见 [`docs/image-library.md`](docs/image-library.md#中文查询怎么走)。
+检索按查询语言分流，中文走三级：**属性筛选 → 文件名/描述文字 → 向量兜底**；纯英文直接走语义。原因是默认 `openai-clip` 的文本塔只认英文，中文直连基本是噪声（`红酒瓶` 会返回表情包）。
+
+第一级是新增的**属性检索**：`浅色衣服`、`黑色衣服`、`肚子胖的人`、`穿得花哨的人` 这类查询问的是画面而不是文件名，所以用一组英文提示词与已存的图片向量做零样本打分，**不写索引、不调 VLM、不下载模型**，首次查询 2.5 秒（之后 3 毫秒）。1262 张素材上目检准确率：黑色 12/12、浅色 10/12、体型 9/12、花哨 10/12；身高不可靠，已标注仅供参考。要精确到具体人物关系仍需要 VLM 描述，详见 [`docs/image-library.md`](docs/image-library.md#属性检索不装模型也能按画面筛)。
 
 人物描述长这样，落在独立字段里（**不放进 tags**，否则会被上游的通用词过滤器当噪声丢掉）：
 

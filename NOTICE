@@ -120,9 +120,38 @@ Modifications made in this fork (AGPL-3.0 section 5(a)), first published
         19 cases: grid model, thumbnail cache, detail preview layout,
         browse and prune APIs.
 
+  - src/services/image_attributes.py                     [new]
+        Zero-shot attribute filters: a panel of English prompts whose
+        mean embedding scores every stored CLIP vector, so 浅色衣服 /
+        肚子胖的人 / 穿得花哨的人 resolve without re-indexing and
+        without a VLM. Han lexicon with negation handling
+        (不花哨 -> 素净), one constraint per group, groups multiplied.
+        Person-free images are demoted rather than dropped, because the
+        gate misreads roughly a fifth of a real library.
+        Height is kept but marked unreliable: CLIP has no notion of
+        stature. Visual check on 1262 photos: 12/12 black, 10/12 light,
+        9/12 heavy build, 10/12 flashy.
+
+  - src/services/image_index_service.py                  [extended]
+        Attribute layer in front of the literal scan:
+        search_by_attributes() scores the cached vector matrix;
+        _load_vector_matrix() keeps it for one index revision
+        (60k row budget); search_by_query() returns attribute hits
+        without falling through, since a filename scan would only add
+        photos that happen to spell the word.
+
+  - tests/test_image_attributes.py                       [new]
+        28 cases: attribute parsing, negation, multi-group scoring,
+        person demotion, attribute-before-literal routing, matrix cache.
+
+  - ui/widgets/image_library_page.py                     [extended]
+        Attribute hint under the search row; the result line says which
+        attributes were applied and flags the height caveat.
+
   - docs/image-library.md                                [new]
         Image library: data model, in-app UI, retrieval modes, Chinese
-        query routing, prompt boundaries, performance, limitations.
+        query routing, attribute search, prompt boundaries,
+        performance, limitations.
 
   - docs/macos-notes.md                                  [new]
         Platform notes, known deltas, troubleshooting, sync policy.

@@ -121,7 +121,10 @@ _STRINGS = {
         "results_empty": "没有命中。换个说法，或先用「浏览全部」确认索引是否有内容。",
         "browse_empty": "还没有索引任何照片。点「添加文件夹」选一个照片目录，再点「开始索引」。",
         "search_failed": "检索失败：{error}",
-        "model_hint_en": "当前模型（{model}）按英文训练：中文查询会先匹配文件名与描述文字，命中不足再用向量补位。要按画面内容理解中文，建议在「设置 → 模型」切到 Chinese CLIP 或 SigLIP2。",
+        "model_hint_en": "当前模型（{model}）按英文训练：中文查询先按画面属性筛选（颜色/体型/风格），再匹配文件名，最后才用向量兜底。要按画面内容理解中文，建议在「设置 → 模型」切到 Chinese CLIP 或 SigLIP2。",
+        "attr_hint": "属性词直接可用：浅色 / 黑色 / 深色 / 彩色 · 胖 / 瘦 · 花哨 / 素净 / 正装 / 休闲。写在一起也行，例如「穿黑色衣服的胖子」。",
+        "attr_prefix": "按属性：{attrs} · ",
+        "attr_low_conf": "（身高类判断不可靠，仅供参考）",
         "detail_empty": "选中一张图片查看详情",
         "detail_open": "打开图片",
         "detail_reveal": "在访达中显示",
@@ -180,7 +183,10 @@ _STRINGS = {
         "results_empty": "No hits. Try another wording, or use “Browse all” to check the index.",
         "browse_empty": "Nothing indexed yet. Click “Add folder”, pick a photo directory, then “Start indexing”.",
         "search_failed": "Search failed: {error}",
-        "model_hint_en": "The active model ({model}) is English-trained: Chinese queries match file names and descriptions first, then backfill with vectors. For real Chinese scene understanding, switch to Chinese CLIP or SigLIP2 in Settings → Models.",
+        "model_hint_en": "The active model ({model}) is English-trained: Chinese queries filter by visual attribute first (colour / build / style), then by file name, and only then fall back to vectors. For real Chinese scene understanding, switch to Chinese CLIP or SigLIP2 in Settings → Models.",
+        "attr_hint": "Attribute words work directly: light / black / dark / colourful · heavy / slim · flashy / plain / formal / casual. Combine them freely, e.g. “a heavy person in black”.",
+        "attr_prefix": "By attribute: {attrs} · ",
+        "attr_low_conf": " (height estimates are unreliable, reference only)",
         "detail_empty": "Select a photo to see details",
         "detail_open": "Open",
         "detail_reveal": "Reveal in Finder",
@@ -809,6 +815,11 @@ class ImageLibraryPage(PageScaffold):
         controls.addWidget(self.btn_browse)
         column.addLayout(controls)
 
+        self.lbl_attr_hint = QLabel(self._t["attr_hint"])
+        self.lbl_attr_hint.setObjectName("Hint")
+        self.lbl_attr_hint.setWordWrap(True)
+        column.addWidget(self.lbl_attr_hint)
+
         self.lbl_model_hint = QLabel("")
         self.lbl_model_hint.setObjectName("Hint")
         self.lbl_model_hint.setWordWrap(True)
@@ -975,6 +986,7 @@ class ImageLibraryPage(PageScaffold):
         self.btn_open.setText(t["detail_open"])
         self.btn_reveal.setText(t["detail_reveal"])
         self.search_input.setPlaceholderText(t["search_placeholder"])
+        self.lbl_attr_hint.setText(t["attr_hint"])
         for index, key in enumerate(("mode_text", "mode_keyword", "mode_image")):
             self.mode_combo.setItemText(index, t[key])
         if not self._roots:
@@ -1363,8 +1375,20 @@ class ImageLibraryPage(PageScaffold):
             note = ""
             if mode == "text" and self._is_vector_only_guess(hits):
                 note = " · " + self._t["results_vector_only"]
+            prefix = ""
+            if mode == "text" and str(hits[0].get("match")) == "attribute":
+                from src.services import image_attributes as attributes
+                from src.services.image_index_service import attribute_summary
+
+                summary = attribute_summary(self._last_query)
+                if summary:
+                    prefix = self._t["attr_prefix"].format(attrs=summary)
+                    if attributes.is_low_confidence(attributes.constraints_for(self._last_query)):
+                        note += self._t["attr_low_conf"]
             self.lbl_search_status.setText(
-                self._t["results_n"].format(count=count, elapsed="").rstrip(" ·") + note
+                prefix
+                + self._t["results_n"].format(count=count, elapsed="").rstrip(" ·")
+                + note
             )
         else:
             empty_key = "browse_empty" if mode == "browse" else "results_empty"

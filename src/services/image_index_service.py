@@ -711,6 +711,111 @@ def _literal_scan(
     return scored[: max(1, int(limit))]
 
 
+# Stored vectors are loaded once per index revision so attribute scoring is a
+# single matmul instead of an ANN round-trip per label. 60k rows is ~120 MB,
+# past which the process would rather not hold the matrix.
+_MAX_ATTRIBUTE_ROWS = 60000
+_VECTOR_MATRIX_CACHE: dict[tuple, tuple[list[dict], np.ndarray]] = {}
+
+# A photo of fabric or a product still scores high on "light coloured clothes",
+# so images the classifier calls person-free are demoted rather than dropped --
+# the gate itself is noisy (roughly a fifth of a real library reads as 无人).
+_NO_PERSON_WEIGHT = 0.35
+
+
+def _matrix_cache_key(config=None) -> tuple:
+    from src.storage import image_lance_store as store
+
+    try:
+        root = str(store.get_image_lance_dir())
+    except (OSError, RuntimeError):  # pragma: no cover - unreadable profile
+        return ("", 0.0)
+    try:
+        stamp = round(float(os.stat(root).st_mtime), 3)
+    except OSError:
+        stamp = 0.0
+    return (root, stamp)
+
+
+def _load_vector_matrix(config=None) -> tuple[list[dict], np.ndarray] | None:
+    from src.storage import image_lance_store as store
+
+    key = _matrix_cache_key(config)
+    cached = _VECTOR_MATRIX_CACHE.get(key)
+    if cached is not None:
+        return cached
+    rows: list[dict] = []
+    vectors: list[np.ndarray] = []
+    for row in store.iter_image_rows(config=config, columns=[*_BROWSE_COLUMNS, "vector"]):
+        vector = row.get("vector")
+        if vector is None:
+            continue
+        rows.append(row)
+        vectors.append(np.asarray(vector, dtype=np.float32))
+        if len(rows) > _MAX_ATTRIBUTE_ROWS:
+            logger.warning(
+                "Attribute search skipped: %s rows exceeds the %s row budget",
+                len(rows),
+                _MAX_ATTRIBUTE_ROWS,
+            )
+            return None
+    if not rows:
+        return None
+    matrix = np.stack(vectors)
+    _VECTOR_MATRIX_CACHE.clear()
+    _VECTOR_MATRIX_CACHE[key] = (rows, matrix)
+    return rows, matrix
+
+
+def attribute_summary(query: str) -> str:
+    """Human-readable attribute reading of a query, '' when it has none."""
+    from src.services import image_attributes as attrs
+
+    return attrs.describe_constraints(attrs.constraints_for(query))
+
+
+def search_by_attributes(
+    query: str,
+    *,
+    config=None,
+    top_k: int = 60,
+    min_people: int = 0,
+    max_people: int = 0,
+) -> list[dict]:
+    """Rank every indexed photo by how well it matches the query's attributes.
+
+    No re-indexing and no VLM: the stored CLIP vector is scored against the
+    prompt panel in ``image_attributes``. Returns ``[]`` when the query carries
+    no recognisable attribute, so callers can fall back cleanly.
+    """
+    from src.services import image_attributes as attrs
+
+    constraints = attrs.constraints_for(query)
+    if not constraints:
+        return []
+    loaded = _load_vector_matrix(config)
+    if loaded is None:
+        return []
+    rows, matrix = loaded
+    probs = attrs.probabilities(matrix, config=config)
+    score = attrs.score_constraints(probs, constraints)
+    if score is None:
+        return []
+    if attrs.needs_person_gate(constraints):
+        gate = attrs.person_gate(probs, len(rows))
+        score = score * (_NO_PERSON_WEIGHT + (1.0 - _NO_PERSON_WEIGHT) * gate)
+
+    hits: list[dict] = []
+    for index in np.argsort(-score):
+        hit = _row_to_hit(rows[int(index)], score=float(score[int(index)]), match="attribute")
+        if not _people_ok(hit, min_people, max_people):
+            continue
+        hits.append(hit)
+        if len(hits) >= max(1, int(top_k)):
+            break
+    return hits
+
+
 def search_by_query(
     query: str,
     *,
@@ -723,10 +828,17 @@ def search_by_query(
     """Search that picks the right channel for the query language.
 
     English queries (and anything without Han characters) go straight to CLIP.
-    Chinese queries run the literal scan first, because the English-only text
-    tower cannot embed them; vector hits only backfill the remaining slots, so
-    穿西装的男人 no longer degenerates into unrelated photos. ``min_score`` only
-    applies to the vector channel -- literal scores live on a different scale.
+    Chinese queries are handled in three steps, cheapest signal first:
+
+    1. **attributes** -- 浅色衣服 / 肚子胖的人 need pixels, not filenames, so they
+       score stored vectors against the panel in ``image_attributes``;
+    2. **literal** -- 穿西装的男人 / 红酒瓶 usually sit in the file name itself;
+    3. **vector** -- only when neither found anything, and the UI labels those
+       results as approximate, because an English text tower embeds Han text
+       into noise.
+
+    ``min_score`` only applies to the vector channel -- the other two live on
+    their own scales.
     """
     text = str(query or "").strip()
     if not text:
@@ -736,6 +848,14 @@ def search_by_query(
     if not has_cjk(text):
         hits = search_by_text(text, config=config, top_k=limit, min_score=min_score)
         return [hit for hit in hits if _people_ok(hit, min_people, max_people)][:limit]
+
+    attribute_hits = search_by_attributes(
+        text, config=config, top_k=limit, min_people=min_people, max_people=max_people
+    )
+    if attribute_hits:
+        # The query named an attribute, so it was a question about pixels; a
+        # filename scan would only add photos that happen to spell the word.
+        return attribute_hits
 
     fragments, latin = query_terms(text)
     hits = _literal_scan(
