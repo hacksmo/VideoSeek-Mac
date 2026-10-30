@@ -237,7 +237,9 @@ def _reveal_in_file_manager(path: str) -> None:
 
 
 def _people_text(person: dict) -> str:
-    fields = ("gender", "age", "clothing", "action", "position", "features")
+    # build / style sit right after clothing: they are what an attribute
+    # search matched on, so leaving them out makes a hit look like a mistake.
+    fields = ("gender", "age", "clothing", "build", "style", "action", "position", "features")
     bits = [str(person.get(name) or "").strip() for name in fields]
     text = " · ".join(bit for bit in bits if bit)
     count = int(person.get("count") or 1)

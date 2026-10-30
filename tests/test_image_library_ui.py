@@ -200,6 +200,33 @@ class DetailPreviewTests(unittest.TestCase):
         self.assertEqual(self.preview.text(), "选择一张图片")
 
 
+class PeopleTextTests(unittest.TestCase):
+    """The detail pane is the only place a match can be explained.
+
+    An attribute search returns rows because of build/style, so dropping those
+    from the line makes a correct hit look like a false positive.
+    """
+
+    def setUp(self):
+        from ui.widgets.image_library_page import _people_text
+
+        self.people_text = _people_text
+
+    def test_build_and_style_are_shown(self):
+        text = self.people_text(
+            {"count": 1, "gender": "男", "clothing": "黑衬衫", "build": "偏胖", "style": "花哨"}
+        )
+        self.assertIn("偏胖", text)
+        self.assertIn("花哨", text)
+
+    def test_field_order_follows_the_description(self):
+        text = self.people_text({"count": 2, "gender": "女", "clothing": "风衣", "build": "偏瘦"})
+        self.assertEqual(text, "2× 女 · 风衣 · 偏瘦")
+
+    def test_person_without_fields_still_reports_a_headcount(self):
+        self.assertEqual(self.people_text({"count": 3}), "3 人")
+
+
 # ---------------------------------------------------------------------------
 # Page construction
 # ---------------------------------------------------------------------------

@@ -63,7 +63,7 @@ def _print_rows(rows: list[dict], *, as_json: bool) -> None:
             for person in people:
                 text = " ".join(
                     str(person.get(field) or "")
-                    for field in ("gender", "age", "clothing", "action", "position")
+                    for field in ("gender", "age", "clothing", "build", "style", "action", "position")
                     if person.get(field)
                 ).strip()
                 if text:
@@ -73,6 +73,10 @@ def _print_rows(rows: list[dict], *, as_json: bool) -> None:
         caption = str(row.get("caption") or "").strip()
         if caption:
             print(f"    描述: {caption}")
+        elif not people_text:
+            # Attribute hits reach rows that are still vector-only, so a block
+            # with just a path is normal mid-index, not a broken match.
+            print("    描述: （未描述，仅向量）")
         if people_text:
             print(f"    人物: {people_text}")
         tags = row.get("tags") or []
