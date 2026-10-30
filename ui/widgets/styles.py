@@ -2853,6 +2853,26 @@ QListWidget#ModelInstalledList::item {
     color: __TEXT__;
     font-size: __FS_XS__;
 }
+QListWidget#ImageRootsList {
+    border: 1px solid __LINE__;
+    border-radius: __RADIUS_MD__;
+    background: __PANEL__;
+    padding: __SPACE_1__;
+    outline: 0;
+}
+QListWidget#ImageRootsList::item {
+    padding: __SPACE_2__ __SPACE_3__;
+    border-radius: __RADIUS_SM__;
+    color: __TEXT__;
+    font-size: __FS_XS__;
+}
+QListWidget#ImageRootsList::item:selected {
+    background: __SELECTION_BG__;
+    color: __TEXT__;
+}
+QListWidget#ImageRootsList::item:hover {
+    background: __OVERLAY_HOVER__;
+}
 #SectionLabel {
     color: __MUTED__;
     font-size: __FS_XS__;

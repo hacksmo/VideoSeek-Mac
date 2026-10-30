@@ -267,8 +267,13 @@ def index_images(
     concurrency: int = 2,
     progress: Callable[[int, int, str], None] | None = None,
     should_stop: Callable[[], bool] | None = None,
+    root_for_path: Callable[[str], str] | None = None,
 ) -> dict:
-    """Index (or re-index) the given image files. Returns ``ImageIndexStats``."""
+    """Index (or re-index) the given image files. Returns ``ImageIndexStats``.
+
+    ``root_for_path`` lets one batch span several registered folders so each row
+    keeps a useful ``rel_path``; without it every row gets ``root``.
+    """
     from src.core.image_io import load_image_bgr
     from src.storage import image_lance_store as store
 
@@ -367,10 +372,16 @@ def index_images(
                     stats.errors.append(f"decode failed: {path}")
                     continue
                 vector = _encode_image(image_bgr)
+                row_root = root
+                if root_for_path is not None:
+                    try:
+                        row_root = str(root_for_path(path) or root)
+                    except Exception:  # pragma: no cover - resolver must not break indexing
+                        row_root = root
                 row = _build_row(
                     image_id=image_id,
                     path=path,
-                    root=root,
+                    root=row_root,
                     stat=file_stat,
                     image_bgr=image_bgr,
                     vector=vector,
@@ -437,6 +448,13 @@ def _row_to_hit(row: Mapping[str, Any], *, score: float, match: str) -> dict:
         "people_count": sum(int(person.get("count") or 1) for person in people if isinstance(person, dict)),
         "score": round(float(score), 4),
         "match": match,
+        # Browsing-only metadata. Vector hits carry them too, but the columns are
+        # optional in a keyword scan, so every value falls back to a neutral 0.
+        "mtime": float(row.get("mtime") or 0.0),
+        "width": int(row.get("width") or 0),
+        "height": int(row.get("height") or 0),
+        "bytes": int(row.get("bytes") or 0),
+        "describer": str(row.get("describer") or ""),
     }
 
 
@@ -529,6 +547,90 @@ def search_by_keyword(
         scored.append((hit["score"], hit))
     scored.sort(key=lambda item: item[0], reverse=True)
     return [hit for _, hit in scored[: max(1, int(top_k))]]
+
+
+# ---------------------------------------------------------------------------
+# Browse / maintenance
+# ---------------------------------------------------------------------------
+
+# Same columns as a keyword scan: never pull the 512-dim vector when the caller
+# only needs to paint a grid.
+_BROWSE_COLUMNS = (
+    "image_id",
+    "image_path",
+    "rel_path",
+    "library_root",
+    "mtime",
+    "width",
+    "height",
+    "bytes",
+    "caption",
+    "people_json",
+    "tags_json",
+    "describer",
+)
+
+_BROWSE_ORDERS = ("recent", "oldest", "name")
+
+
+def list_indexed_images(
+    *,
+    config=None,
+    order: str = "recent",
+    limit: int = 0,
+    offset: int = 0,
+    root: str = "",
+) -> list[dict]:
+    """Every indexed row, sorted for browsing (no query vector involved).
+
+    ``limit=0`` returns the whole table, which is what a photo grid wants: the
+    Qt view virtualises painting, so the model can hold every row and still be
+    smooth. Rows are plain ``_row_to_hit`` dicts with ``match="browse"``.
+    """
+    from src.storage import image_lance_store as store
+
+    sort_key = str(order or "recent")
+    if sort_key not in _BROWSE_ORDERS:
+        sort_key = "recent"
+    root_filter = os.path.normpath(str(root or "").strip()) if str(root or "").strip() else ""
+
+    rows: list[dict] = []
+    for row in store.iter_image_rows(config=config, columns=list(_BROWSE_COLUMNS)):
+        if root_filter and os.path.normpath(str(row.get("library_root") or "")) != root_filter:
+            continue
+        rows.append(row)
+
+    if sort_key == "recent":
+        rows.sort(key=lambda item: float(item.get("mtime") or 0.0), reverse=True)
+    elif sort_key == "oldest":
+        rows.sort(key=lambda item: float(item.get("mtime") or 0.0))
+    else:
+        rows.sort(key=lambda item: str(item.get("rel_path") or item.get("image_path") or "").casefold())
+
+    start = max(0, int(offset or 0))
+    if start:
+        rows = rows[start:]
+    if limit:
+        rows = rows[: max(0, int(limit))]
+    return [_row_to_hit(row, score=0.0, match="browse") for row in rows]
+
+
+def prune_missing_images(*, config=None, dry_run: bool = False) -> dict:
+    """Drop rows whose source file disappeared. Returns ``{missing, removed}``."""
+    from src.storage import image_lance_store as store
+
+    missing: list[str] = []
+    for row in store.iter_image_rows(config=config, columns=["image_id", "image_path"]):
+        path = str(row.get("image_path") or "")
+        if not path or os.path.isfile(path):
+            continue
+        image_id = str(row.get("image_id") or "")
+        if image_id:
+            missing.append(image_id)
+    removed = 0
+    if missing and not dry_run:
+        removed = int(store.delete_images(missing, config=config) or 0)
+    return {"missing": len(missing), "removed": removed, "image_ids": missing}
 
 
 # ---------------------------------------------------------------------------

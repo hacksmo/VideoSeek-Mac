@@ -216,22 +216,17 @@ def _cmd_status(args) -> int:
 
 
 def _cmd_prune(args) -> int:
-    from src.storage import image_lance_store as store
+    from src.services import image_index_service as service
 
-    missing: list[str] = []
-    for row in store.iter_image_rows(columns=["image_id", "image_path"]):
-        path = str(row.get("image_path") or "")
-        if path and not os.path.isfile(path):
-            missing.append(str(row.get("image_id") or ""))
-    missing = [value for value in missing if value]
+    result = service.prune_missing_images(dry_run=args.dry_run)
+    missing = int(result.get("missing") or 0)
     if not missing:
         print("没有失效记录。")
         return 0
     if args.dry_run:
-        print(f"将删除 {len(missing)} 条失效记录（--dry-run，未执行）")
+        print(f"将删除 {missing} 条失效记录（--dry-run，未执行）")
         return 0
-    removed = store.delete_images(missing)
-    print(f"已删除 {removed} 条失效记录。")
+    print(f"已删除 {result.get('removed', 0)} 条失效记录。")
     return 0
 
 

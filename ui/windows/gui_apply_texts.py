@@ -21,6 +21,12 @@ class ApplyTextsGuiMixin:
         self.sidebar.btn_page_search.setText(t["nav_search"])
         self.sidebar.btn_page_link.setText(t["nav_link"])
         self.sidebar.btn_page_library.setText(t["nav_library"])
+        nav_images = self.sidebar.nav_button("images")
+        if nav_images is not None:
+            nav_images.setText(t.get("nav_images", "图片库"))
+        images_page = getattr(self, "images_page", None)
+        if images_page is not None:
+            images_page.apply_texts(getattr(self, "language", "zh"))
         self.sidebar.btn_page_understanding.setText(t["nav_understanding"])
         self.sidebar.btn_page_settings.setText(t["nav_settings"])
         self.sidebar.btn_collapse.setToolTip(t.get("nav_sidebar_hide", "隐藏侧边栏 (Ctrl+B)"))

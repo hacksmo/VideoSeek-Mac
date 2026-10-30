@@ -258,6 +258,14 @@ class TrayGuiMixin:
         shutdown_thread(getattr(self, "dialogue_index_worker", None), stop_first=True, wait_ms=2000)
         shutdown_thread(getattr(self, "remove_library_worker", None), stop_first=True, wait_ms=2000)
         shutdown_thread(getattr(self, "_local_vector_detail_worker", None), wait_ms=1500)
+        images_page = getattr(self, "images_page", None)
+        if images_page is not None:
+            try:
+                images_page.shutdown()
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui_tray.py:images_page_shutdown")
         self.mobile_bridge_controller.shutdown()
         if hasattr(self, "team_mode_controller"):
             self.team_mode_controller.shutdown()

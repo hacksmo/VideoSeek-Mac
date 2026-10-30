@@ -52,6 +52,7 @@ from ui.widgets.components import (
     SearchPage,
 )
 from ui.widgets.understanding_page import UnderstandingEvidencePage
+from ui.widgets.image_library_page import ImageLibraryPage
 from ui.widgets.settings import SettingsPage
 from ui.widgets.scaffold import make_runtime_inline_tip
 from ui.dialogs import AboutDialog, AppMessageDialog, DonateDialog, MobileBridgeDialog, NoticeDialog, SkipEdgesDialog
@@ -120,7 +121,7 @@ class MainWindow(
     Optional plugins may insert pages (e.g. after understanding) via ``src.app.plugins``.
     """
 
-    _BUILTIN_NAV_PAGE_ORDER = ("search", "library", "understanding", "link", "settings")
+    _BUILTIN_NAV_PAGE_ORDER = ("search", "library", "images", "understanding", "link", "settings")
 
     def __init__(self):
         super().__init__()
@@ -285,9 +286,17 @@ class MainWindow(
         self.search_page = SearchPage()
         self.link_page = LinkSearchPage()
         self.library_page = LibraryPage()
+        self.images_page = ImageLibraryPage()
         self.understanding_page = UnderstandingEvidencePage()
         self.understanding_services_dialog = self.understanding_page.services_panel
         self.settings_page = SettingsPage()
+        # Built-in page that does not exist in the original sidebar: register its
+        # nav button explicitly, right after the video library.
+        self.sidebar.register_nav_page(
+            "images",
+            self.texts.get("nav_images", "图片库"),
+            insert_after="library",
+        )
         self._plugin_page_widgets = {}
         self._plugin_page_specs = {}
         registry = get_registry()
@@ -309,6 +318,9 @@ class MainWindow(
         builtin_widgets = {
             "search": lambda: self._build_scroll_page(self.search_page, pin_to_viewport=True),
             "library": lambda: self._build_scroll_page(self.library_page),
+            # Owns its scrolling (virtualised grid); an outer QScrollArea would
+            # fight the results list for the wheel.
+            "images": lambda: self.images_page,
             "understanding": lambda: self._build_scroll_page(self.understanding_page),
             "link": lambda: self._build_scroll_page(self.link_page),
             "settings": lambda: self.settings_page,
@@ -378,6 +390,8 @@ class MainWindow(
         self.sidebar.btn_page_search.clicked.connect(lambda: self.switch_page("search"))
         self.sidebar.btn_page_link.clicked.connect(lambda: self.switch_page("link"))
         self.sidebar.btn_page_library.clicked.connect(lambda: self.switch_page("library"))
+        if hasattr(self.sidebar, "btn_page_images"):
+            self.sidebar.btn_page_images.clicked.connect(lambda: self.switch_page("images"))
         self.sidebar.btn_page_understanding.clicked.connect(lambda: self.switch_page("understanding"))
         self.sidebar.btn_page_settings.clicked.connect(lambda: self.switch_page("settings"))
         self.sidebar.btn_theme.clicked.connect(self.toggle_theme)

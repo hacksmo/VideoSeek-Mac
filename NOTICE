@@ -52,6 +52,11 @@ Modifications made in this fork (AGPL-3.0 section 5(a)), first published
         Image scan, incremental indexing (CLIP + optional VLM
         description), text / keyword / image search, status.
 
+  - src/services/image_index_service.py                  [extended]
+        index_images(root_for_path=...) so one batch can span several
+        registered folders; list_indexed_images() for grid browsing;
+        prune_missing_images() moved here from the CLI.
+
   - scripts/image_index.py                               [new]
         CLI: add / remove / roots / scan / index / search /
         status / prune.
@@ -60,8 +65,36 @@ Modifications made in this fork (AGPL-3.0 section 5(a)), first published
         30 cases covering formats, description parsing, scanning,
         content ids, Lance read/write, keyword and people filters.
 
+  - ui/widgets/image_library_page.py                     [new]
+        In-app photo library page: folder management, indexing with
+        progress and cancel, virtualised thumbnail grid, detail pane,
+        drag-and-drop, people filter.
+
+  - ui/image_thumbs.py                                   [new]
+        Disk thumbnail cache (~/.videoseek/cache/image_thumbs) plus an
+        off-thread loader, so the grid never decodes originals.
+
+  - ui/windows/gui.py                                    [modified]
+        Registers one extra built-in nav page ("images", after the
+        video library) and its sidebar button. No existing page,
+        signal or controller changed.
+
+  - ui/windows/gui_apply_texts.py, ui/windows/gui_tray.py [modified]
+        Refresh the new page's labels on language switch; shut its
+        workers down with the rest of the app.
+
+  - src/app/i18n.py                                      [modified]
+        Added the nav_images string (zh/en). No existing key changed.
+
+  - ui/widgets/styles.py                                 [modified]
+        Added QSS for #ImageRootsList (folder list) only.
+
+  - tests/test_image_library_ui.py                       [new]
+        19 cases: grid model, thumbnail cache, detail preview layout,
+        browse and prune APIs.
+
   - docs/image-library.md                                [new]
-        Image library: data model, retrieval modes, prompt
+        Image library: data model, in-app UI, retrieval modes, prompt
         boundaries, performance, limitations.
 
   - docs/macos-notes.md                                  [new]
@@ -70,9 +103,10 @@ Modifications made in this fork (AGPL-3.0 section 5(a)), first published
   - DEPLOY-macOS.md                                      [removed]
         Content merged into docs/macos-notes.md.
 
-The image library is additive: it adds a new table and new modules and does
-not modify the video indexing, search, export, OCR or Agent API code paths.
-Deleting the image_assets table returns the app to upstream behaviour.
-No functional behaviour changes were made beyond the ffmpeg binary
-detection above. Windows-specific code paths, packaging scripts and the
-installer pipeline are untouched and unsupported here.
+The image library is additive: it adds one Lance table, new modules, one nav
+page and a handful of QSS rules. The video indexing, search, export, OCR and
+Agent API paths are untouched, and deleting the image_assets table returns the
+app to upstream indexing behaviour (the empty page stays). Beyond the ffmpeg
+binary detection, no upstream function changed its behaviour; the GUI edits
+above only add the new page. Windows-specific code paths, packaging scripts and
+the installer pipeline are untouched and unsupported here.
