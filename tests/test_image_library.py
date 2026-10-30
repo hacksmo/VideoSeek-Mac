@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import unittest
+from unittest.mock import patch
 
 
 from src.media.formats import (
@@ -117,6 +118,43 @@ class ImageDescriptionParseTests(unittest.TestCase):
     def test_prompt_carries_the_no_identity_rule(self):
         self.assertIn("不推测姓名", build_image_prompt("zh"))
         self.assertIn("Never guess names", build_image_prompt("en"))
+
+    def test_truncated_json_is_repaired_not_filed_as_prose(self):
+        # A crowded frame runs past the reply budget; without repair the whole
+        # fragment became a prose caption and every person in it was lost.
+        truncated = (
+            '{"caption": "校园内人群聚集", "people": ['
+            '{"count": 1, "gender": "男", "age": "青年", "clothing": "黑色制服", '
+            '"build": "偏瘦", "style": "正装", "action": "站立观察", "features": '
+        )
+        parsed = parse_image_description(truncated)
+        self.assertTrue(parsed["parse_ok"])
+        self.assertEqual(parsed["caption"], "校园内人群聚集")
+        self.assertEqual(len(parsed["people"]), 1)
+        self.assertEqual(parsed["people"][0]["build"], "偏瘦")
+
+    def test_truncated_json_keeps_only_complete_entries(self):
+        truncated = (
+            '{"caption": "街拍", "people": ['
+            '{"count": 1, "gender": "女", "clothing": "驼色大衣"}, '
+            '{"count": 1, "gender": "男", "clothing": "黑衬衫"}, '
+            '{"count": 1, "gender": '
+        )
+        parsed = parse_image_description(truncated)
+        self.assertTrue(parsed["parse_ok"])
+        self.assertEqual([p["gender"] for p in parsed["people"]], ["女", "男"])
+
+    def test_truncated_after_caption_still_yields_the_caption(self):
+        # Cut inside the unclosed people array, before any person finished.
+        parsed = parse_image_description('{"caption": "海边日落", "people": [')
+        self.assertTrue(parsed["parse_ok"])
+        self.assertEqual(parsed["caption"], "海边日落")
+        self.assertEqual(parsed["people"], [])
+
+    def test_plain_prose_is_not_mistaken_for_json(self):
+        parsed = parse_image_description("这张照片里有两个人站在窗边。")
+        self.assertFalse(parsed["parse_ok"])
+        self.assertEqual(parsed["people"], [])
 
     def test_build_and_style_survive_parsing(self):
         parsed = parse_image_description(
@@ -587,6 +625,44 @@ class PruneOfflineRootTests(unittest.TestCase):
             service.load_manifest = original_manifest  # type: ignore[assignment]
         self.assertEqual(result["skipped_offline"], 0)
         self.assertEqual(result["image_ids"], ["b" * 32])
+
+
+class DescribeMarkerTests(unittest.TestCase):
+    """describer records whether the reply parsed, so index() can retry.
+
+    Without the marker a damaged row looks finished: it has a caption (the
+    raw fragment), so the mtime check skips it forever, even after the parser
+    learned to repair truncation.
+    """
+
+    def _describe(self, parsed):
+        from src.services import image_index_service as service
+
+        with (
+            patch(
+                "src.services.image_understanding.describe_image_bgr",
+                return_value=parsed,
+            ),
+            patch(
+                "src.services.understanding_resource_service.get_remote_vlm_settings",
+                return_value={"model": "qwen3-vl:4b"},
+            ),
+        ):
+            return service._describe_one(None, config=None, should_stop=None)
+
+    def test_unparsed_reply_is_marked(self):
+        row = self._describe({"caption": "x", "people": [], "tags": [], "parse_ok": False})
+        self.assertEqual(row["describer"], "vlm:qwen3-vl:4b:unparsed")
+
+    def test_parsed_reply_is_not_marked(self):
+        row = self._describe({"caption": "x", "people": [], "tags": [], "parse_ok": True})
+        self.assertEqual(row["describer"], "vlm:qwen3-vl:4b")
+
+    def test_suffix_is_distinct_from_a_model_named_unparsed(self):
+        from src.services.image_index_service import UNPARSED_SUFFIX
+
+        self.assertEqual(UNPARSED_SUFFIX, ":unparsed")
+        self.assertNotIn(UNPARSED_SUFFIX, "vlm:qwen3-vl:4b")
 
 
 if __name__ == "__main__":

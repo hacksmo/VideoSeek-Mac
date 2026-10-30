@@ -120,6 +120,70 @@ def _strip_code_fences(text: str) -> str:
     return raw
 
 
+_CLOSING = {"{": "}", "[": "]"}
+
+
+def _close_open_brackets(prefix: str) -> str:
+    """Append the brackets a truncated JSON prefix still needs, or "".
+
+    Returns "" when the prefix ends inside a string literal: closing the
+    quote there would invent a value the model never wrote, so the caller
+    should cut earlier instead.
+    """
+    stack: list[str] = []
+    in_string = False
+    escaped = False
+    for char in prefix:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char in _CLOSING:
+            stack.append(char)
+        elif char in "}]":
+            if stack:
+                stack.pop()
+    if in_string:
+        return ""
+    return prefix + "".join(_CLOSING[char] for char in reversed(stack))
+
+
+def _repair_truncated_json(text: str) -> dict | None:
+    """Salvage a JSON object that stopped mid-way, e.g. at the token cap.
+
+    A crowded photo produces more per-person fields than the reply budget
+    allows, and a truncated object does not parse -- the old behaviour was to
+    file the raw fragment as a prose caption, losing every person in the
+    frame. Walking backwards to the last separator and closing what is still
+    open recovers the caption and every complete entry.
+    """
+    start = text.find("{")
+    if start < 0:
+        return None
+    body = text[start:]
+    cuts = [index for index, char in enumerate(body) if char in ',{[]}' and index > 0]
+    for cut in reversed(cuts[-200:]):
+        prefix = body[:cut].rstrip().rstrip(",:").rstrip()
+        if not prefix:
+            continue
+        candidate = _close_open_brackets(prefix)
+        if not candidate:
+            continue
+        try:
+            value = json.loads(candidate)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if isinstance(value, dict):
+            return value
+    return None
+
+
 def _extract_json_object(text: str) -> dict | None:
     raw = _strip_code_fences(text)
     if not raw:
@@ -133,7 +197,7 @@ def _extract_json_object(text: str) -> dict | None:
             continue
         if isinstance(value, dict):
             return value
-    return None
+    return _repair_truncated_json(raw)
 
 
 def _clean_text(value: Any, *, limit: int) -> str:
@@ -285,10 +349,11 @@ def describe_image_bgr(
                 ],
             }
         ],
-        # A group photo with build/style on every person runs past 576 tokens,
-        # and a truncated reply parses as plain text -- i.e. the description is
-        # silently lost. Cap generously; the model stops when the JSON closes.
-        "max_tokens": max(384, min(1024, int(settings.get("max_tokens", 192) or 192) * 4)),
+        # Eight fields per person: a 12-person frame runs well past 1024
+        # tokens, and a reply cut at the cap used to lose the caption too.
+        # The model stops when the JSON closes, so a generous ceiling is free
+        # on the easy images and only spent on the crowded ones.
+        "max_tokens": min(2048, max(1024, int(settings.get("max_tokens", 192) or 192) * 8)),
         "temperature": 0.1,
     }
     prefill = _json_prefill(settings)

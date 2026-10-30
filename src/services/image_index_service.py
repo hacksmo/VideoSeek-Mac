@@ -42,6 +42,10 @@ MANIFEST_VERSION = 1
 LIBRARY_DIR_NAME = "image_library"
 MANIFEST_NAME = "library.json"
 
+# Suffix of a describer value whose VLM reply could not be parsed as JSON.
+# Such a row holds prose, not structured fields, so it is worth another pass.
+UNPARSED_SUFFIX = ":unparsed"
+
 # Image files are small; a full content hash is the cheapest way to get a stable
 # id and free de-duplication. Chunked so a 200 MB TIFF does not sit in RAM.
 _HASH_CHUNK = 1 << 20
@@ -356,11 +360,13 @@ def index_images(
                 existing = store.get_image_row(
                     image_id,
                     config=config,
-                    columns=["image_id", "mtime", "caption"],
+                    columns=["image_id", "mtime", "caption", "describer"],
                 )
+                unparsed = UNPARSED_SUFFIX in str((existing or {}).get("describer") or "")
                 if (
                     existing
                     and not force
+                    and not unparsed
                     and abs(float(existing.get("mtime") or 0) - float(file_stat.st_mtime)) < 1e-6
                     and (not describe_enabled or str(existing.get("caption") or "").strip())
                 ):
@@ -420,6 +426,11 @@ def _describe_one(image_bgr, *, config, should_stop) -> dict:
     except Exception:  # pragma: no cover - defensive
         model = ""
     describer = f"vlm:{model}" if model else "vlm"
+    if parsed.get("parse_ok") is False:
+        # Marks the row for a retry: index() re-describes these even without
+        # --force, so a parser fix (or a bigger token budget) heals a library
+        # instead of leaving the damaged rows behind forever.
+        describer += UNPARSED_SUFFIX
     return {**parsed, "describer": describer}
 
 
