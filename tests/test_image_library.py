@@ -512,5 +512,46 @@ class SearchByQueryTests(unittest.TestCase):
         self.assertEqual(service.search_by_query("   "), [])
 
 
+class PruneOfflineRootTests(unittest.TestCase):
+    """An unplugged drive must not be mistaken for 1262 deleted photos."""
+
+    def test_rows_under_an_offline_root_are_skipped(self):
+        from src.services import image_index_service as service
+        from src.storage import image_lance_store as store
+
+        rows = [
+            {"image_id": "a" * 32, "image_path": "/Volumes/GoneDrive/photos/x.jpg"},
+            {"image_id": "b" * 32, "image_path": "/tmp/vs-definitely-missing.jpg"},
+        ]
+        original_iter = store.iter_image_rows
+        original_manifest = service.load_manifest
+        store.iter_image_rows = lambda **kwargs: iter(rows)  # type: ignore[assignment]
+        service.load_manifest = lambda: {"roots": [{"root": "/Volumes/GoneDrive"}]}  # type: ignore[assignment]
+        try:
+            result = service.prune_missing_images(dry_run=True)
+        finally:
+            store.iter_image_rows = original_iter  # type: ignore[assignment]
+            service.load_manifest = original_manifest  # type: ignore[assignment]
+        self.assertEqual(result["skipped_offline"], 1)
+        self.assertEqual(result["image_ids"], ["b" * 32])
+
+    def test_nothing_is_skipped_when_every_root_is_online(self):
+        from src.services import image_index_service as service
+        from src.storage import image_lance_store as store
+
+        rows = [{"image_id": "b" * 32, "image_path": "/tmp/vs-definitely-missing.jpg"}]
+        original_iter = store.iter_image_rows
+        original_manifest = service.load_manifest
+        store.iter_image_rows = lambda **kwargs: iter(rows)  # type: ignore[assignment]
+        service.load_manifest = lambda: {"roots": [{"root": "/tmp"}]}  # type: ignore[assignment]
+        try:
+            result = service.prune_missing_images(dry_run=True)
+        finally:
+            store.iter_image_rows = original_iter  # type: ignore[assignment]
+            service.load_manifest = original_manifest  # type: ignore[assignment]
+        self.assertEqual(result["skipped_offline"], 0)
+        self.assertEqual(result["image_ids"], ["b" * 32])
+
+
 if __name__ == "__main__":
     unittest.main()

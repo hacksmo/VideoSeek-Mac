@@ -70,6 +70,12 @@ Modifications made in this fork (AGPL-3.0 section 5(a)), first published
         search now defaults to search_by_query(), so the CLI gets the
         same Chinese routing as the GUI.
 
+  - src/services/image_index_service.py                  [extended]
+        prune_missing_images() skips rows whose registered root is
+        unreachable, so an unplugged external drive is not read as
+        "every photo was deleted". Reported as skipped_offline and
+        surfaced by the page.
+
   - scripts/image_index.py                               [new]
         CLI: add / remove / roots / scan / index / search /
         status / prune.

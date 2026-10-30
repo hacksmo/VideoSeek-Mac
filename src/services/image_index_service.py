@@ -826,14 +826,38 @@ def list_indexed_images(
     return [_row_to_hit(row, score=0.0, match="browse") for row in rows]
 
 
+def _offline_roots(config=None) -> list[str]:
+    """Registered roots whose directory is not reachable right now.
+
+    An external drive that is unplugged makes every file look deleted; pruning
+    on that basis would wipe a perfectly good index, so those rows are skipped
+    instead of dropped.
+    """
+    manifest = load_manifest()
+    offline: list[str] = []
+    for entry in manifest.get("roots", []):
+        if not isinstance(entry, dict):
+            continue
+        root = str(entry.get("root") or "")
+        if root and not os.path.isdir(root):
+            offline.append(os.path.normpath(root))
+    return offline
+
+
 def prune_missing_images(*, config=None, dry_run: bool = False) -> dict:
     """Drop rows whose source file disappeared. Returns ``{missing, removed}``."""
     from src.storage import image_lance_store as store
 
+    offline = _offline_roots(config=config)
     missing: list[str] = []
+    skipped_offline = 0
     for row in store.iter_image_rows(config=config, columns=["image_id", "image_path"]):
         path = str(row.get("image_path") or "")
         if not path or os.path.isfile(path):
+            continue
+        norm = os.path.normpath(path)
+        if any(norm == root or norm.startswith(root + os.sep) for root in offline):
+            skipped_offline += 1
             continue
         image_id = str(row.get("image_id") or "")
         if image_id:
@@ -841,7 +865,12 @@ def prune_missing_images(*, config=None, dry_run: bool = False) -> dict:
     removed = 0
     if missing and not dry_run:
         removed = int(store.delete_images(missing, config=config) or 0)
-    return {"missing": len(missing), "removed": removed, "image_ids": missing}
+    return {
+        "missing": len(missing),
+        "removed": removed,
+        "skipped_offline": skipped_offline,
+        "image_ids": missing,
+    }
 
 
 # ---------------------------------------------------------------------------

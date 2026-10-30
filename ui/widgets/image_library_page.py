@@ -89,6 +89,7 @@ _STRINGS = {
         "prune_running": "正在检查失效记录…",
         "prune_done": "已清理 {removed} 条失效记录（文件已被移动或删除）",
         "prune_none": "没有失效记录",
+        "prune_offline": "有 {count} 条记录所在目录当前不可用（硬盘没挂载？），已跳过未删除",
         "start_index": "开始索引",
         "stop": "停止",
         "describe_toggle": "同时生成描述（需 VLM）",
@@ -147,6 +148,7 @@ _STRINGS = {
         "prune_running": "Checking for stale rows…",
         "prune_done": "Removed {removed} rows whose files no longer exist",
         "prune_none": "No stale rows",
+        "prune_offline": "{count} rows live in a folder that is currently unreachable (drive unplugged?) — kept, not deleted",
         "start_index": "Start indexing",
         "stop": "Stop",
         "describe_toggle": "Also describe (needs VLM)",
@@ -1150,10 +1152,16 @@ class ImageLibraryPage(PageScaffold):
 
     def _on_pruned(self, result: dict) -> None:
         self.btn_prune.setEnabled(True)
-        removed = int((result or {}).get("removed") or 0)
-        self._note = (
-            self._t["prune_done"].format(removed=removed) if removed else self._t["prune_none"]
-        )
+        result = result or {}
+        removed = int(result.get("removed") or 0)
+        skipped = int(result.get("skipped_offline") or 0)
+        if removed:
+            self._note = self._t["prune_done"].format(removed=removed)
+        elif skipped:
+            # The drive is unplugged: those rows are kept, not stale.
+            self._note = self._t["prune_offline"].format(count=skipped)
+        else:
+            self._note = self._t["prune_none"]
         self.refresh_status()
         self._run_search("browse", "")
 
