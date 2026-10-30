@@ -57,13 +57,28 @@ Modifications made in this fork (AGPL-3.0 section 5(a)), first published
         registered folders; list_indexed_images() for grid browsing;
         prune_missing_images() moved here from the CLI.
 
+  - src/services/image_index_service.py                  [extended]
+        Chinese query routing. has_cjk() / query_terms() split a Han
+        query at stop characters into 2-4 char sliding windows;
+        search_by_query() runs a literal scan over caption / path /
+        tags first and only falls back to CLIP vectors when nothing
+        matched. The bundled CLIP text tower is English-only, so a
+        Chinese query used to embed to noise. English queries keep the
+        pure semantic path unchanged.
+
+  - scripts/image_index.py                               [extended]
+        search now defaults to search_by_query(), so the CLI gets the
+        same Chinese routing as the GUI.
+
   - scripts/image_index.py                               [new]
         CLI: add / remove / roots / scan / index / search /
         status / prune.
 
-  - tests/test_image_library.py                          [new]
+  - tests/test_image_library.py                          [extended]
         30 cases covering formats, description parsing, scanning,
-        content ids, Lance read/write, keyword and people filters.
+        content ids, Lance read/write, keyword and people filters;
+        plus 12 for Chinese fragment extraction, literal scoring and
+        the search_by_query language routing.
 
   - ui/widgets/image_library_page.py                     [new]
         In-app photo library page: folder management, indexing with
@@ -73,6 +88,12 @@ Modifications made in this fork (AGPL-3.0 section 5(a)), first published
   - ui/image_thumbs.py                                   [new]
         Disk thumbnail cache (~/.videoseek/cache/image_thumbs) plus an
         off-thread loader, so the grid never decodes originals.
+
+  - ui/widgets/image_library_page.py                     [extended]
+        Semantic search now calls search_by_query(); the model hint and
+        the result line explain the Chinese routing, and a vector-only
+        fallback is labelled as such instead of pretending the search
+        matched.
 
   - ui/windows/gui.py                                    [modified]
         Registers one extra built-in nav page ("images", after the
@@ -94,8 +115,8 @@ Modifications made in this fork (AGPL-3.0 section 5(a)), first published
         browse and prune APIs.
 
   - docs/image-library.md                                [new]
-        Image library: data model, in-app UI, retrieval modes, prompt
-        boundaries, performance, limitations.
+        Image library: data model, in-app UI, retrieval modes, Chinese
+        query routing, prompt boundaries, performance, limitations.
 
   - docs/macos-notes.md                                  [new]
         Platform notes, known deltas, troubleshooting, sync policy.

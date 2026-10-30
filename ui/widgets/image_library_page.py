@@ -116,10 +116,11 @@ _STRINGS = {
         "search": "搜索",
         "searching": "检索中…",
         "results_n": "{count} 张结果 · {elapsed}",
+        "results_vector_only": "没有文字匹配，以下是向量近似结果，可能不相关",
         "results_empty": "没有命中。换个说法，或先用「浏览全部」确认索引是否有内容。",
         "browse_empty": "还没有索引任何照片。点「添加文件夹」选一个照片目录，再点「开始索引」。",
         "search_failed": "检索失败：{error}",
-        "model_hint_en": "当前模型（{model}）按英文训练，中文描述命中率低。建议在「设置 → 模型」切到 Chinese CLIP 或 SigLIP2，或改用关键词 / 以图搜图。",
+        "model_hint_en": "当前模型（{model}）按英文训练：中文查询会先匹配文件名与描述文字，命中不足再用向量补位。要按画面内容理解中文，建议在「设置 → 模型」切到 Chinese CLIP 或 SigLIP2。",
         "detail_empty": "选中一张图片查看详情",
         "detail_open": "打开图片",
         "detail_reveal": "在访达中显示",
@@ -173,10 +174,11 @@ _STRINGS = {
         "search": "Search",
         "searching": "Searching…",
         "results_n": "{count} results · {elapsed}",
+        "results_vector_only": "no text match — showing nearest vectors, likely unrelated",
         "results_empty": "No hits. Try another wording, or use “Browse all” to check the index.",
         "browse_empty": "Nothing indexed yet. Click “Add folder”, pick a photo directory, then “Start indexing”.",
         "search_failed": "Search failed: {error}",
-        "model_hint_en": "The active model ({model}) is English-trained, so Chinese queries match poorly. Switch to Chinese CLIP or SigLIP2 in Settings → Models, or use keyword / image search.",
+        "model_hint_en": "The active model ({model}) is English-trained: Chinese queries match file names and descriptions first, then backfill with vectors. For real Chinese scene understanding, switch to Chinese CLIP or SigLIP2 in Settings → Models.",
         "detail_empty": "Select a photo to see details",
         "detail_open": "Open",
         "detail_reveal": "Reveal in Finder",
@@ -329,7 +331,12 @@ class _SearchWorker(QThread):
             elif self._mode == "image":
                 hits = service.search_by_image(self._query, top_k=self._top_k)
             else:
-                hits = service.search_by_text(self._query, top_k=self._top_k)
+                # search_by_query keeps English queries on the CLIP path and
+                # routes Chinese ones through a literal scan first, because the
+                # bundled text tower is English-only.
+                hits = service.search_by_query(
+                    self._query, top_k=self._top_k, min_people=self._min_people
+                )
             self.results.emit(list(hits))
         except Exception as exc:
             self.failed.emit(str(exc))
@@ -659,6 +666,7 @@ class ImageLibraryPage(PageScaffold):
         self._search_worker = None
         self._status_worker = None
         self._scan_files: list[str] = []
+        self._last_query = ""
         self._index_after_scan = False
         self._index_started_at = 0.0
         self._current_hit: dict = {}
@@ -1313,6 +1321,7 @@ class ImageLibraryPage(PageScaffold):
     def _run_search(self, mode: str, query: str) -> None:
         if self._search_worker is not None and self._search_worker.isRunning():
             return
+        self._last_query = str(query or "")
         self.lbl_search_status.setText(self._t["searching"])
         self.btn_search.setEnabled(False)
         worker = _SearchWorker(
@@ -1343,13 +1352,28 @@ class ImageLibraryPage(PageScaffold):
         count = len(hits)
         if count:
             self.grid.setCurrentIndex(self._model.index(0))
+            note = ""
+            if mode == "text" and self._is_vector_only_guess(hits):
+                note = " · " + self._t["results_vector_only"]
             self.lbl_search_status.setText(
-                self._t["results_n"].format(count=count, elapsed="").rstrip(" ·")
+                self._t["results_n"].format(count=count, elapsed="").rstrip(" ·") + note
             )
         else:
             empty_key = "browse_empty" if mode == "browse" else "results_empty"
             self.lbl_search_status.setText(self._t[empty_key])
             self._clear_detail()
+
+    def _is_vector_only_guess(self, hits: list) -> bool:
+        """True when a Chinese query matched nothing literally and fell back to vectors.
+
+        Those results look random to a user who expects text matching, so the
+        result count gets a caveat instead of pretending the search worked.
+        """
+        if not hits or any(str(hit.get("match")) != "vector" for hit in hits):
+            return False
+        from src.services.image_index_service import has_cjk
+
+        return has_cjk(self._last_query)
 
     def _on_search_failed(self, message: str) -> None:
         self.btn_search.setEnabled(True)

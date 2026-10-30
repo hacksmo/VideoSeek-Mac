@@ -232,6 +232,20 @@ class ImageLibraryPageTests(unittest.TestCase):
         self.page.apply_texts("zh")
         self.assertEqual(self.page.header.title.text(), "图片库")
 
+    def test_vector_only_results_get_a_caveat(self):
+        page = self.page
+        vector_hits = [{"image_id": "a" * 32, "match": "vector", "people_count": 0}]
+        page._last_query = "海边日落"
+        self.assertTrue(page._is_vector_only_guess(vector_hits))
+
+        # A literal hit means the query really matched file text: no caveat.
+        mixed = vector_hits + [{"image_id": "b" * 32, "match": "keyword", "people_count": 0}]
+        self.assertFalse(page._is_vector_only_guess(mixed))
+
+        # English queries legitimately live on the vector path.
+        page._last_query = "a sunset by the sea"
+        self.assertFalse(page._is_vector_only_guess(vector_hits))
+
     def test_people_filter_drops_results_below_the_threshold(self):
         hits = [
             {"image_id": "a" * 32, "people_count": 0},

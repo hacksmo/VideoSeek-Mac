@@ -532,7 +532,19 @@ def search_by_keyword(
     terms = [term for term in str(keyword or "").casefold().split() if term]
     if not terms:
         return []
-    columns = ["image_id", "image_path", "rel_path", "library_root", "caption", "people_json", "tags_json"]
+    columns = [
+        "image_id",
+        "image_path",
+        "rel_path",
+        "library_root",
+        "caption",
+        "people_json",
+        "tags_json",
+        "mtime",
+        "width",
+        "height",
+        "bytes",
+    ]
     scored: list[tuple[float, dict]] = []
     for row in store.iter_image_rows(config=config, columns=columns):
         haystack = _keyword_haystack(row)
@@ -547,6 +559,205 @@ def search_by_keyword(
         scored.append((hit["score"], hit))
     scored.sort(key=lambda item: item[0], reverse=True)
     return [hit for _, hit in scored[: max(1, int(top_k))]]
+
+
+# ---------------------------------------------------------------------------
+# Query routing: Chinese text needs a literal fallback
+# ---------------------------------------------------------------------------
+
+# The bundled CLIP text tower is trained on English captions, so a Chinese
+# query embeds to noise: on a 1262-photo library 红酒瓶 scored ~0.29 against
+# joke photos while "a bottle of red wine" found the wine shots. Chinese asset
+# libraries name their files descriptively, so the honest fix is to match the
+# query's Han fragments literally and let the vector channel only backfill the
+# slots the literal scan could not fill. English queries keep the pure
+# semantic path -- it already works well and a literal scan would only noise it
+# up with filename coincidences.
+
+_CJK_STOP_CHARS = frozenset(
+    "的了着过是在有和与或都很也都就你找我他她它们这那些吗呢啊吧么呀嘛把被给对从向往为以于之其个张条只种"
+)
+_FRAGMENT_MIN = 2
+_FRAGMENT_MAX = 4
+
+
+def _is_cjk_char(ch: str) -> bool:
+    code = ord(ch)
+    return (
+        0x3400 <= code <= 0x4DBF  # CJK Extension A
+        or 0x4E00 <= code <= 0x9FFF  # CJK Unified Ideographs
+        or 0xF900 <= code <= 0xFAFF  # CJK Compatibility Ideographs
+    )
+
+
+def has_cjk(text: str) -> bool:
+    """True when ``text`` contains at least one Han character."""
+    return any(_is_cjk_char(ch) for ch in str(text or ""))
+
+
+def query_terms(query: str) -> tuple[list[str], list[str]]:
+    """Split a query into Han fragments plus Latin words.
+
+    No tokenizer ships with the app, so every Han run is cut at stop characters
+    and expanded into 2-4 character sliding windows::
+
+        穿西装的男人 -> ["穿西装", "穿西", "西装", "男人"]
+
+    Longer fragments are more specific, so callers rank by the length of the
+    longest match rather than by how many fragments happened to hit.
+    """
+    text = str(query or "").casefold()
+    fragments: list[str] = []
+    seen: set[str] = set()
+    run: list[str] = []
+
+    def _push(value: str) -> None:
+        if value and value not in seen:
+            seen.add(value)
+            fragments.append(value)
+
+    def _flush() -> None:
+        word = "".join(run)
+        run.clear()
+        if len(word) < _FRAGMENT_MIN:
+            return
+        # Short runs still need their sub-windows: 红酒瓶 must be able to hit a
+        # file named 汇立红酒文化, and the longest match still outranks 红酒.
+        for size in range(min(_FRAGMENT_MAX, len(word)), _FRAGMENT_MIN - 1, -1):
+            for start in range(0, len(word) - size + 1):
+                _push(word[start : start + size])
+
+    for ch in text:
+        if _is_cjk_char(ch) and ch not in _CJK_STOP_CHARS:
+            run.append(ch)
+        else:
+            _flush()
+    _flush()
+
+    latin: list[str] = []
+    word: list[str] = []
+    for ch in text:
+        if ch.isalnum() and not _is_cjk_char(ch):
+            word.append(ch)
+        else:
+            if len(word) >= 2:
+                latin.append("".join(word))
+            word = []
+    if len(word) >= 2:
+        latin.append("".join(word))
+    return fragments, latin
+
+
+def _literal_score(haystack: str, fragments: Sequence[str], latin: Sequence[str]) -> float:
+    """0-1 literal relevance; longest match dominates, extra matches add a bonus."""
+    lengths = sorted((len(frag) for frag in fragments if frag in haystack), reverse=True)
+    words = sum(1 for word in latin if word in haystack)
+    if not lengths and not words:
+        return 0.0
+    best = lengths[0] if lengths else 0
+    extra = len(lengths) - 1
+    # best * 10 keeps fragment length dominant; extra matches separate two photos
+    # that both matched only a 2-char fragment (牛仔外套 vs a bare 外套).
+    return min(1.0, (best * 10.0 + extra * 3.0 + words * 5.0) / (_FRAGMENT_MAX * 10.0 + 6.0))
+
+
+def _people_ok(hit: Mapping[str, Any], min_people: int, max_people: int) -> bool:
+    count = int(hit.get("people_count") or 0)
+    if min_people and count < int(min_people):
+        return False
+    if max_people and count > int(max_people):
+        return False
+    return True
+
+
+def _literal_scan(
+    fragments: Sequence[str],
+    latin: Sequence[str],
+    *,
+    config=None,
+    limit: int = 50,
+    min_people: int = 0,
+    max_people: int = 0,
+) -> list[dict]:
+    from src.storage import image_lance_store as store
+
+    if not fragments and not latin:
+        return []
+    # mtime/width/height/bytes feed the detail pane; without them every literal
+    # hit renders as "—×— · 0 B" even though the row has the data.
+    columns = [
+        "image_id",
+        "image_path",
+        "rel_path",
+        "library_root",
+        "caption",
+        "people_json",
+        "tags_json",
+        "mtime",
+        "width",
+        "height",
+        "bytes",
+    ]
+    scored: list[dict] = []
+    for row in store.iter_image_rows(config=config, columns=columns):
+        score = _literal_score(_keyword_haystack(row), fragments, latin)
+        if score <= 0:
+            continue
+        hit = _row_to_hit(row, score=score, match="keyword")
+        if not _people_ok(hit, min_people, max_people):
+            continue
+        scored.append(hit)
+    scored.sort(key=lambda hit: hit["score"], reverse=True)
+    return scored[: max(1, int(limit))]
+
+
+def search_by_query(
+    query: str,
+    *,
+    config=None,
+    top_k: int = 60,
+    min_people: int = 0,
+    max_people: int = 0,
+    min_score: float = 0.0,
+) -> list[dict]:
+    """Search that picks the right channel for the query language.
+
+    English queries (and anything without Han characters) go straight to CLIP.
+    Chinese queries run the literal scan first, because the English-only text
+    tower cannot embed them; vector hits only backfill the remaining slots, so
+    穿西装的男人 no longer degenerates into unrelated photos. ``min_score`` only
+    applies to the vector channel -- literal scores live on a different scale.
+    """
+    text = str(query or "").strip()
+    if not text:
+        return []
+    limit = max(1, int(top_k))
+
+    if not has_cjk(text):
+        hits = search_by_text(text, config=config, top_k=limit, min_score=min_score)
+        return [hit for hit in hits if _people_ok(hit, min_people, max_people)][:limit]
+
+    fragments, latin = query_terms(text)
+    hits = _literal_scan(
+        fragments,
+        latin,
+        config=config,
+        limit=limit,
+        min_people=min_people,
+        max_people=max_people,
+    )
+    if hits:
+        # Any literal hit means the file text actually names what was asked for.
+        # Padding with vectors here would only add noise: an English text tower
+        # scores every Chinese query at 0.28-0.32 against unrelated photos, so
+        # "more results" would mean "more wrong photos".
+        return hits
+
+    return [
+        hit
+        for hit in search_by_text(text, config=config, top_k=limit, min_score=min_score)
+        if _people_ok(hit, min_people, max_people)
+    ][:limit]
 
 
 # ---------------------------------------------------------------------------

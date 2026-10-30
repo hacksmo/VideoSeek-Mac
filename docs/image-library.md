@@ -131,6 +131,42 @@ $V scripts/image_index.py search --mode image --image ~/Pictures/q.jpg
 
 实测：以图搜图时查询图自身的得分是 `1.000` 且排第一，属正常的自匹配基线。
 
+### 中文查询怎么走
+
+默认模型 `openai-clip/vit-base-patch32` 的**文本塔只认英文**。中文查询送进去基本是噪声——在 1262 张素材库上实测：
+
+| 查询 | 直连 CLIP 的结果 |
+|------|------------------|
+| `红酒瓶` | 搞笑表情包 |
+| `穿西装的男人` | 「老公在家」穿搭图 |
+| `南京夫子庙夜景` | 羊羔绒面料科普图 |
+| `a bottle of red wine` | 奔富红酒（准确） |
+
+所以 `search`（界面「语义检索」和 CLI 默认模式）现在按查询语言分流：
+
+```
+含汉字 ──> 字面扫描（文件名 / caption / tags / people）
+              └─ 命中不足 top_k 时才用 CLIP 向量补位
+纯英文 ──> 直接走 CLIP 向量
+```
+
+字面扫描不用分词器，按停用字切开每段连续汉字，再展开 2–4 字滑窗：
+
+```
+穿西装的男人 -> ["穿西装", "穿西", "西装", "男人"]
+红酒瓶       -> ["红酒瓶", "红酒", "酒瓶"]
+```
+
+排序按**命中最长片段的长度**主导，其余命中片段加权。所以「肌肉男穿西装」排在只有「西装」二字的图前面。同一批查询在分流后的结果：
+
+| 查询 | 分流后 Top 1 |
+|------|--------------|
+| `穿西装的男人` | 肌肉男穿西装 |
+| `老钱风穿搭` | 170+ 秋冬老钱风穿搭 |
+| `红酒瓶` | 奔富 407 汇立红酒文化 |
+
+**这套分流只解决"找得到"，不解决"看得懂"**：它依赖文件名/描述里有对应中文词。搜「夫子庙」而文件名里没这三个字，照样召回不到。要按画面内容理解中文，得换模型——见第 8 节。
+
 ## 5. 人物描述从哪来
 
 复用你已有的 VLM 配置，**不新增任何依赖、不下载新模型**：
@@ -206,6 +242,7 @@ $V scripts/image_index.py remove <folder>   # 取消登记（不删已索引行�
 | 多选批量操作（批量重描述、批量移除） | 页面是逐张查看；批量管理仍走 CLI |
 | 视频与图片在同一个搜索框里混排 | 需要把图片并入统一媒体模型，改动面大，单独排期 |
 | 人脸识别 / 人物聚类 / 身份归属 | 合规风险，且与"描述画面"是两件事 |
+| 中文语义理解（不靠文件名） | 需要换模型：设置 → 模型里切 `chinese_clip_onnx` 或 `siglip2_onnx`。两者的模型文件不在默认模型包里，得先导入；切换后**必须重算索引**（向量空间不同） |
 | 一张图多个区域分别描述 | 单图单向量；区域级需要检测框 + 多向量 |
 | 本地 VLM（ONNX） | 现有链路全是 OpenAI 兼容 HTTP，接本地 ONNX VLM 是新工程 |
 
@@ -216,9 +253,9 @@ $V scripts/image_index.py remove <folder>   # 取消登记（不删已索引行�
 | `src/media/formats.py` | `IMAGE_EXTS` / `is_supported_image_path`（与 `VIDEO_EXTS` 严格分离） |
 | `src/storage/image_lance_store.py` | `image_assets` 表：schema、upsert、向量检索、全表扫描、统计、删除 |
 | `src/services/image_understanding.py` | 描述 prompt、JSON 解析与容错、VLM 调用、可达性探测 |
-| `src/services/image_index_service.py` | 扫描、增量索引、CLIP 编码、三种检索、状态 |
+| `src/services/image_index_service.py` | 扫描、增量索引、CLIP 编码、三种检索、中文查询分流、状态 |
 | `scripts/image_index.py` | 命令行入口 |
 | `ui/widgets/image_library_page.py` | 图片库页签：目录管理、索引进度、虚拟化网格、详情、拖拽 |
 | `ui/image_thumbs.py` | 缩略图磁盘缓存 + 异步加载（网格 256 / 详情 1024） |
-| `tests/test_image_library.py` | 30 个用例：格式、解析、扫描、内容 ID、Lance 读写、关键词与人数过滤 |
+| `tests/test_image_library.py` | 41 个用例：格式、解析、扫描、内容 ID、Lance 读写、关键词与人数过滤、中文分词与查询路由 |
 | `tests/test_image_library_ui.py` | 19 个用例：网格模型、缩略图缓存、详情布局、浏览与清理接口 |

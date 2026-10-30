@@ -113,6 +113,8 @@ $V scripts/image_index.py search "红裙" --mode keyword  # 关键词
 $V scripts/image_index.py search --mode image --image q.jpg  # 以图搜图
 ```
 
+检索按查询语言分流：**含汉字时先匹配文件名与描述文字**，命中不足才用 CLIP 向量补位；纯英文直接走语义。原因是默认 `openai-clip` 的文本塔只认英文，中文直连基本是噪声（`红酒瓶` 会返回表情包）。要按画面内容理解中文，得在设置里切 `chinese_clip_onnx` / `siglip2_onnx` 并重算索引，详见 [`docs/image-library.md`](docs/image-library.md#中文查询怎么走)。
+
 人物描述长这样，落在独立字段里（**不放进 tags**，否则会被上游的通用词过滤器当噪声丢掉）：
 
 ```json

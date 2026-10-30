@@ -189,7 +189,16 @@ def _cmd_search(args) -> int:
         if not query:
             print("请输入查询词，或用 --mode image --image <路径>")
             return 2
-        rows = service.search_by_text(query, top_k=args.top_k, min_score=args.min_score)
+        # Chinese queries must not go straight to CLIP: the bundled text tower
+        # is English-only, so search_by_query matches literal text first and
+        # only backfills with vectors.
+        rows = service.search_by_query(
+            query,
+            top_k=args.top_k,
+            min_people=args.min_people,
+            max_people=args.max_people,
+            min_score=args.min_score,
+        )
     _print_rows(rows, as_json=args.json)
     return 0
 

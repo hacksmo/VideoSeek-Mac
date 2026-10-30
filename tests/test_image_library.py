@@ -16,8 +16,11 @@ from src.media.formats import (
 )
 from src.services.image_index_service import (
     _keyword_haystack,
+    _literal_score,
     _row_to_hit,
     file_content_id,
+    has_cjk,
+    query_terms,
     scan_image_files,
 )
 from src.services.image_understanding import (
@@ -375,6 +378,138 @@ class KeywordSearchTests(unittest.TestCase):
             store.iter_image_rows = original_iter  # type: ignore[assignment]
         self.assertEqual([hit["image_id"] for hit in many], ["b" * 32])
         self.assertEqual([hit["image_id"] for hit in only_one], ["a" * 32])
+
+
+class ChineseQueryTests(unittest.TestCase):
+    """Chinese queries must not be handed to the English-only CLIP tower."""
+
+    def test_has_cjk_detects_han_only(self):
+        self.assertTrue(has_cjk("西装"))
+        self.assertTrue(has_cjk("OOTD 穿搭"))
+        self.assertFalse(has_cjk("a man in a suit"))
+        self.assertFalse(has_cjk(""))
+
+    def test_terms_split_at_stop_chars(self):
+        fragments, latin = query_terms("穿西装的男人")
+        self.assertIn("穿西装", fragments)
+        self.assertIn("西装", fragments)
+        self.assertIn("男人", fragments)
+        self.assertNotIn("的", fragments)
+        self.assertEqual(latin, [])
+
+    def test_short_run_still_gets_sub_windows(self):
+        # 红酒瓶 has to be able to hit a file named 汇立红酒文化.
+        fragments, _ = query_terms("红酒瓶")
+        self.assertEqual(fragments, ["红酒瓶", "红酒", "酒瓶"])
+
+    def test_latin_words_are_kept_alongside_han(self):
+        _, latin = query_terms("老钱风 OOTD")
+        self.assertEqual(latin, ["ootd"])
+
+    def test_literal_score_prefers_the_longer_fragment(self):
+        fragments, latin = query_terms("穿西装的男人")
+        strong = _literal_score("肌肉男穿西装不好看", fragments, latin)
+        weak = _literal_score("西装店", fragments, latin)
+        self.assertGreater(strong, weak)
+        self.assertGreater(weak, 0.0)
+
+    def test_literal_score_is_zero_without_a_match(self):
+        fragments, latin = query_terms("红酒瓶")
+        self.assertEqual(_literal_score("一只猫在睡觉", fragments, latin), 0.0)
+
+
+class SearchByQueryTests(unittest.TestCase):
+    ROWS = [
+        {
+            "image_id": "a" * 32,
+            "image_path": "/tmp/穿西装的男人.jpg",
+            "rel_path": "穿西装的男人.jpg",
+            "library_root": "/tmp",
+            "caption": "",
+            "people_json": "[]",
+            "tags_json": "[]",
+        },
+        {
+            "image_id": "b" * 32,
+            "image_path": "/tmp/猫.jpg",
+            "rel_path": "猫.jpg",
+            "library_root": "/tmp",
+            "caption": "",
+            "people_json": "[]",
+            "tags_json": "[]",
+        },
+    ]
+
+    def _run(self, query, *, vector_hits, top_k=10):
+        from src.services import image_index_service as service
+        from src.storage import image_lance_store as store
+
+        original_iter = store.iter_image_rows
+        original_vector = service.search_by_text
+        store.iter_image_rows = lambda **kwargs: iter(self.ROWS)  # type: ignore[assignment]
+        service.search_by_text = lambda *a, **k: list(vector_hits)  # type: ignore[assignment]
+        try:
+            return service.search_by_query(query, top_k=top_k)
+        finally:
+            store.iter_image_rows = original_iter  # type: ignore[assignment]
+            service.search_by_text = original_vector  # type: ignore[assignment]
+
+    @staticmethod
+    def _vector_hit(image_id, score=0.3):
+        return {
+            "image_id": image_id,
+            "image_path": f"/tmp/{image_id}.jpg",
+            "rel_path": f"{image_id}.jpg",
+            "library_root": "/tmp",
+            "caption": "",
+            "people": [],
+            "tags": [],
+            "people_count": 0,
+            "score": score,
+            "match": "vector",
+        }
+
+    def test_chinese_query_leads_with_literal_hits(self):
+        hits = self._run("穿西装的男人", vector_hits=[self._vector_hit("b" * 32)])
+        self.assertEqual(hits[0]["image_id"], "a" * 32)
+        self.assertEqual(hits[0]["match"], "keyword")
+
+    def test_literal_hits_are_not_padded_with_vectors(self):
+        # Vector backfill would only add noise for a Chinese query.
+        hits = self._run("穿西装的男人", vector_hits=[self._vector_hit("b" * 32)])
+        self.assertEqual([hit["image_id"] for hit in hits], ["a" * 32])
+
+    def test_vectors_are_used_when_nothing_matches_literally(self):
+        hits = self._run("海边日落", vector_hits=[self._vector_hit("b" * 32)])
+        self.assertEqual([hit["match"] for hit in hits], ["vector"])
+
+    def test_english_query_skips_the_literal_scan(self):
+        def _boom(**kwargs):
+            raise AssertionError("literal scan must not run for an English query")
+
+        from src.services import image_index_service as service
+        from src.storage import image_lance_store as store
+
+        original_iter = store.iter_image_rows
+        original_vector = service.search_by_text
+        store.iter_image_rows = _boom  # type: ignore[assignment]
+        service.search_by_text = lambda *a, **k: [self._vector_hit("b" * 32)]  # type: ignore[assignment]
+        try:
+            hits = service.search_by_query("a man in a suit", top_k=5)
+        finally:
+            store.iter_image_rows = original_iter  # type: ignore[assignment]
+            service.search_by_text = original_vector  # type: ignore[assignment]
+        self.assertEqual([hit["match"] for hit in hits], ["vector"])
+
+    def test_duplicate_ids_are_not_returned_twice(self):
+        hits = self._run("穿西装的男人", vector_hits=[self._vector_hit("a" * 32), self._vector_hit("b" * 32)])
+        ids = [hit["image_id"] for hit in hits]
+        self.assertEqual(len(ids), len(set(ids)))
+
+    def test_empty_query_returns_nothing(self):
+        from src.services import image_index_service as service
+
+        self.assertEqual(service.search_by_query("   "), [])
 
 
 if __name__ == "__main__":
