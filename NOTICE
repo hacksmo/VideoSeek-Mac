@@ -3,3 +3,42 @@ Copyright (C) 2026 6v17 <https://github.com/6v17>
 
 This project is licensed under the GNU Affero General Public License v3.0.
 See the LICENSE file for the full license text.
+
+--------------------------------------------------------------------------
+macOS fork notice
+--------------------------------------------------------------------------
+
+This repository is an unofficial macOS port of VideoSeek:
+     upstream: https://github.com/6v17/VideoSeek
+     fork:     https://github.com/hacksmo/VideoSeek
+
+Original work, design and core implementation: 6v17 <https://github.com/6v17>.
+The fork author claims no authorship over the original program; all credit
+belongs to the upstream author and contributors. Windows users should use
+the upstream repository instead of this one.
+
+Modifications made in this fork (AGPL-3.0 section 5(a)), first published
+2026-10-30:
+
+  - src/infra/ffmpeg_paths.py
+        is_ffmpeg_binary_usable() now also accepts Mach-O binaries
+        (thin 32/64-bit and universal/fat headers), so a Homebrew or
+        static macOS ffmpeg is recognised as valid.
+
+  - install-macos.command, run-macos.command            [new]
+        Double-clickable launchers: virtualenv bootstrap with a Python
+        3.11-3.13 interpreter, mirror/proxy aware dependency install,
+        libvlc environment for VLC.app, version sanity checks.
+
+  - README.md, README.zh.md, docs/quickstart.md          [rewritten]
+        Rewritten around macOS instead of Windows.
+
+  - docs/macos-notes.md                                  [new]
+        Platform notes, known deltas, troubleshooting, sync policy.
+
+  - DEPLOY-macOS.md                                      [removed]
+        Content merged into docs/macos-notes.md.
+
+No functional behaviour changes were made beyond the ffmpeg binary
+detection above. Windows-specific code paths, packaging scripts and the
+installer pipeline are untouched and unsupported here.

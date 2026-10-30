@@ -78,7 +78,13 @@ def is_ffmpeg_binary_usable(path: str) -> bool:
     if os.name == "nt":
         magic_ok = magic[:2] == b"MZ"
     else:
-        magic_ok = magic[:4] == b"\x7fELF" or magic[:2] == b"MZ"
+        # macOS local patch: Mach-O (thin/fat) binaries are not ELF/MZ, but they are
+        # valid ffmpeg builds from Homebrew / official static builds.
+        magic_ok = (
+            magic[:4] == b"\x7fELF"
+            or magic[:2] == b"MZ"
+            or magic[:4] in (b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe", b"\xfe\xed\xfa\xcf", b"\xfe\xed\xfa\xce", b"\xca\xfe\xba\xbe")
+        )
     if not magic_ok:
         return False
     return _ffmpeg_reports_version(text, size, mtime)

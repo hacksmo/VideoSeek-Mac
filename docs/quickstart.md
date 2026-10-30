@@ -1,91 +1,174 @@
-# VideoSeek 快速上手
+# VideoSeek macOS 快速上手
 
-给 **从源码跑** 或需要排障的人看。装安装包的用户看 [README（中文）](../README.zh.md) 即可。
+本文件只讲 **macOS**。Windows 请回上游：[`6v17/VideoSeek`](https://github.com/6v17/VideoSeek)。
 
-## 1) 依赖与启动
-
-```bash
-pip install -r requirements.txt
-python main.py
-```
-
-Windows 上 `requirements.txt` 已含 DirectML 等；Linux / macOS 需自行把 `onnxruntime-directml` 换成 `onnxruntime`。
-
-## 2) 运行资源
-
-仓库不带模型、FFmpeg、VLC 二进制。按弹窗或设置里的 **导入运行资源** 处理：
-
-| 资源 | 做法 |
-|------|------|
-| **模型 + FFmpeg** | **方式一**：下载 [123 云盘 zip](https://1858268090.share.123pan.cn/123pan/VFA7vd-vhJXA)，在应用内 **导入并解析**（可把 `ffmpeg.exe` 和 zip 一起加入）。**方式二**：从 [GitHub Releases — models](https://github.com/6v17/VideoSeek/releases/tag/models) 下载所需文件（如 `openai-clip.zip`、`siglip2.zip`、`chinese-clip.zip`、`ffmpeg.exe`），同样在应用内 **导入并解析** |
-| **VLC（Windows 源码）** | 从 [GitHub Releases — vlc_lib](https://github.com/6v17/VideoSeek/releases/tag/vlc_lib) 下载 `vlc_lib.zip`，解压到与 `main.py` 同级的 `vlc_lib/` |
-| **安装包用户** | 一般已全部内置 |
-
-备选：模型 zip 和 `ffmpeg.exe` 已经在本机、不想点导入弹窗时，agent 可关掉 VideoSeek，下载 [import_runtime_resources.py](https://raw.githubusercontent.com/6v17/VideoSeek/master/scripts/import_runtime_resources.py) 后执行。不需要克隆仓库，写入本机已安装的 `%LOCALAPPDATA%\VideoSeek`（`config.json`、`models\`、`ffmpeg_path`，默认 `bin\ffmpeg.exe`）：
-
-```bat
-python import_runtime_resources.py openai-clip.zip ffmpeg.exe
-python import_runtime_resources.py --status
-```
-
-缺 VLC 时搜索/建库仍可用，预览可能不能播。
-
-## 3) 常见问题
-
-**不支持的 URL** — 用视频详情页链接，不要用列表/频道页。
-
-**需要刷新 Cookie** — 来源站限制；更新浏览器 Cookie 后重试。
-
-**构建完成但新增向量为 0** — 链接被预检拦截、重复，或源视频解析失败；看 UI 构建摘要。
-
-**从旧版升级（≥ 1.0.82）** — 遗留 npy/faiss → **Lance**：到 **设置 → 路径管理 → 迁移遗留索引** 主动执行（启动不再自动跑重迁移）。配置 schema / 视频 ID 等轻量检查仍会在启动快速完成。
-
-### 版本号（正式 / QQ 群测）
-
-- **运行时版本：** `src/app/app_meta.py` 的 `version`（窗口标题、关于页、打包 `VERSION.txt` 都读它）。改版时同步 `pyproject.toml` 的 `version`。
-- **群测：** `1.0.93-beta.1`（同一基线可 `.2`…）；包名 `VideoSeek-1.0.93-beta.1.zip`；**不要**写入公开 `version.json`。
-- **正式：** `1.0.93`（以 `app_meta.py` 为准）；打 tag `v1.0.93`；再更新 OSS `version.json`。
-- 比较规则：同基线时 `beta` **小于** 正式版（`1.0.93-beta.1` < `1.0.93`）。
-- **安装包**：请从 [GitHub Releases](https://github.com/6v17/VideoSeek/releases) 下载官方包。完整打包脚本（Nuitka / Inno）**不公开**，由维护者本地使用。
-- 完整版安装后首启：主窗口先显示，再在后台导入自带 `runtime\`（顶栏进度，不挡界面）。**老用户**只补缺包，**不改当前检索模型**。Agent：`VideoSeek.exe --bootstrap-runtime`。
-- **CAM++：** 仓库已带 `resources/asr/campplus.onnx` + `.onnx.data`（解说对白声线聚类）；也可从桌面资源包 `cam++.zip` 导入。
+- 只想用 → 看 [README](../README.zh.md)
+- 想看为什么这么改、踩过哪些坑 → 看 [`macos-notes.md`](macos-notes.md)
 
 ---
 
-## 附录 A：手动摆模型（一般不用）
+## 1) 前置条件
 
-仅在不走 zip 导入时用。路径：`%LOCALAPPDATA%\VideoSeek\models\` 或项目根 `models/`。
-
-默认 `clip_onnx` 需要同目录下的 `clip_visual.onnx`、`clip_text.onnx`、`bpe_simple_vocab_16e6.txt.gz`。换 `siglip2_onnx` / `chinese_clip_onnx` 等时文件列表随 profile 变。
-
-自定义包需同目录放置 **`model_manifest.json`**（不是 `manifest.json`），至少含 `provider` 与 `variant`。大参数包还应写 `embedding_dimension` / `image_size`（导入会写入 profile）。官方 zip 已自带，字段细节见 `src/services/model_package_service.py`。
-
-**224 大档包（导出后打包）：**
+| 依赖 | 要求 | 检查 |
+|------|------|------|
+| macOS | 13 Ventura 及以上（Apple Silicon 实测通过） | `sw_vers` |
+| 命令行工具 | 提供 `git`、`clang` | `xcode-select -p` |
+| Python | **3.11 – 3.13**，推荐 3.13 arm64 | `python3 -V` |
+| FFmpeg | 任意近期版本，Homebrew 装即可 | `ffmpeg -version` |
+| VLC | 可选，仅影响预览播放 | `ls /Applications/VLC.app` |
 
 ```bash
-python scripts/pack_vision_model_zip.py --list
-python scripts/export_chinese_clip_onnx.py --pack chinese-clip-vit-large-patch14
-python scripts/export_openai_clip_onnx.py --pack openai-clip-vit-large-patch14
-python scripts/export_siglip2_onnx.py --pack siglip2-so400m-patch14-224
-python scripts/pack_vision_model_zip.py --pack chinese-clip-vit-large-patch14
-python scripts/pack_vision_model_zip.py --pack openai-clip-vit-large-patch14
-python scripts/pack_vision_model_zip.py --pack siglip2-so400m-patch14-224
+xcode-select --install
+brew install python@3.13 ffmpeg
+brew install --cask vlc        # 可选
 ```
 
-依赖：`pip install torch transformers pillow onnx`。每个大档是独立 profile，导入后须对该 profile **重新同步索引**。
+**为什么锁 3.11–3.13**：`onnxruntime==1.23.0`、`faiss-cpu==1.13.2` 没有 cp39 / cp314 的 macOS
+wheel。解释器版本不对时 pip 会直接报 `from versions: none`，看起来像"包不存在"，其实是"这个 Python
+版本没有包"。
 
-切换设置里的当前模型后，须重新同步媒体库索引。
+```bash
+# 自查：确认 python3 到底指向哪一个
+which -a python3
+/opt/homebrew/bin/python3.13 -c 'import platform; print(platform.machine())'   # 期望 arm64
+```
+
+## 2) 安装依赖
+
+### 方式一：用脚本（推荐）
+
+```bash
+cd ~/Desktop/VideoSeek
+./install-macos.command          # 或在 Finder 里双击
+```
+
+脚本行为：
+
+1. 依次探测 `/opt/homebrew/bin/python3.13`、`3.12`、`3.11`、`/usr/local/bin/*`、`$PATH` 上的 `python3`，
+   只接受 3.11–3.13；
+2. 建虚拟环境 `~/.videoseek-venv`；已存在但版本不符则自动重建；
+3. 探测本机代理端口（10808 → 7890 → 1087 → 6152 → 8080 → 8888），有则给 pip 带上 `--proxy`；
+4. 用阿里云镜像装依赖，失败自动回退官方 PyPI；
+5. 单独补装两个"上游锁死但 arm64 无 wheel"的可选包；
+6. 自检 `PySide6 / onnxruntime / cv2 / numpy / lancedb / faiss / fastapi`。
+
+### 方式二：手动
+
+```bash
+cd ~/Desktop/VideoSeek
+
+# 1. 选解释器
+PY=/opt/homebrew/bin/python3.13
+$PY -m venv ~/.videoseek-venv
+V=~/.videoseek-venv/bin/python
+
+# 2. 装主依赖（剔除 mac 上装不上的两个）
+grep -v -e '^rookiepy' -e '^rapidocr-onnxruntime' requirements.txt > /tmp/req-mac.txt
+$V -m pip install -r /tmp/req-mac.txt -i https://mirrors.aliyun.com/pypi/simple/ --proxy http://127.0.0.1:10808
+
+# 3. OCR：上游锁的 1.4.4 没有 arm64 wheel，改装可用版本
+$V -m pip install rapidocr-onnxruntime -i https://mirrors.aliyun.com/pypi/simple/
+
+# 4. 自检
+$V -c 'import PySide6, onnxruntime, cv2, numpy, lancedb, faiss, fastapi; print("ok")'
+```
+
+`--proxy` 按需删掉；不用镜像就去掉 `-i`。`rookiepy` 只用于"从浏览器读 Cookie"，
+无 py3.13 arm64 wheel，代码里也没有引用，跳过无副作用。
+
+## 3) 导入运行资源
+
+仓库不带模型、不带 ffmpeg 二进制。
+
+| 资源 | 是否必须 | 来源 |
+|------|----------|------|
+| `openai-clip.zip`（393 MB，默认检索模型） | **必须**，否则无法建索引 | [Releases — models](https://github.com/6v17/VideoSeek/releases/tag/models) |
+| `rapidocr-zh-understanding.zip`（15 MB） | 需要硬字幕 OCR 时装 | 同上 |
+| FFmpeg | 用 Homebrew 的即可 | `brew install ffmpeg` |
+| VLC | 要预览播放时装 | `brew install --cask vlc` |
+
+```bash
+V=~/.videoseek-venv/bin/python
+$V scripts/import_runtime_resources.py openai-clip.zip rapidocr-zh-understanding.zip
+$V scripts/import_runtime_resources.py --status
+```
+
+`--status` 期望：
+
+```
+model_ready: True | ffmpeg_ready: True | resources_ready: True
+```
+
+导入前请**先退出 VideoSeek**，否则配置可能被运行中的实例覆盖。
+这条命令与应用内「导入并解析」走同一套写入逻辑，产物落在 `~/.videoseek/`。
+
+## 4) 启动与首次使用
+
+```bash
+./run-macos.command        # 或 Finder 双击
+```
+
+启动脚本会做三件事：
+
+1. 确认 `~/.videoseek-venv` 存在且 Python 版本合规（不合规就提示你重跑安装）；
+2. 检测 `/Applications/VLC.app`，有则导出 `DYLD_LIBRARY_PATH` 与 `VLC_PLUGIN_PATH`；
+3. `exec $VENV/bin/python main.py`。
+
+首次使用路径：
+
+**视频库** → 添加文件夹 → 勾选视频 → **同步选中视频** → **搜索** → 预览 → 导出
+
+同步是 CPU 推理，短片段大约 1 帧/秒量级，几十个短视频的首轮索引要等一会儿，之后搜索是毫秒级。
+
+## 5) 排错
+
+| 报错 / 现象 | 原因 | 处理 |
+|-------------|------|------|
+| `No matching distribution found for onnxruntime==1.23.0` | `python3` 是 3.14 / 3.9 | 用 `install-macos.command`，或显式指定 3.13 |
+| `ERROR: Could not build wheels for rookiepy` | 无 arm64 wheel | 跳过，或从 requirements 里删掉 |
+| 启动即报 `ModuleNotFoundError: PySide6` | 装到了别的解释器 / 别的 venv | 确认用的是 `~/.videoseek-venv/bin/python` |
+| 应用打不开、无窗口 | 见 `~/.videoseek/logs/app.log` 末尾 | 多为模型缺失或 ONNX 加载失败 |
+| 提示"未找到 FFmpeg"但 `ffmpeg -version` 正常 | 上游只认 ELF/PE 文件头 | 确认 `src/infra/ffmpeg_paths.py` 的 Mach-O 分支还在 |
+| 预览黑屏 / 无声 | 没装 VLC 或 libvlc 未加载 | 装 VLC.app 后用 `run-macos.command` 启动 |
+| 同步完成但"新增向量为 0" | 预检拦截、重复文件、解码失败 | 看 UI 构建摘要；试单个文件复现 |
+| 下载模型极慢 | GitHub 直连限速 | 挂代理；或用 `curl -r` 分段并发下载再合并 |
+| 装依赖时终端里 `sandbox-exec` 报错 | 在受限环境里跑 brew | 在普通终端里手动执行 `brew install` |
+
+清空重来：
+
+```bash
+rm -rf ~/.videoseek-venv     # 只删环境，不动数据和模型
+rm -rf ~/.videoseek          # 连数据、模型、日志一起删（谨慎）
+```
+
+## 附录 A：手动摆模型
+
+一般不需要，`import_runtime_resources.py` 会处理。要手工放时：
+
+```
+~/.videoseek/models/openai-clip/vit-base-patch32/
+├── clip_visual.onnx        # 351 MB
+├── clip_text.onnx          # 254 MB
+├── bpe_simple_vocab_16e6.txt.gz
+└── model_manifest.json     # 必须是这个名字，不是 manifest.json
+```
+
+`config.json` 中对应 `models.active_profile = clip_onnx_default`。
+换模型 profile 后**必须重新同步索引**，旧向量维度不同不能混用。
 
 ## 附录 B：测试
 
 ```bash
-python -m pytest tests/ -q
+~/.videoseek-venv/bin/python -m pytest tests/ -q
 ```
 
-UI 相关测试需已安装 PySide6（`pip install -r requirements.txt` 即可）。
+UI 相关用例需要 PySide6，主依赖里已包含。部分用例涉及 ffmpeg 与模型，缺失时会 skip。
 
 ## 附录 C：其它
 
-- **FFmpeg 路径**：也可放到 `%LOCALAPPDATA%\VideoSeek\bin\` 或系统 `PATH`。
-- **硬件解码（Windows 实验）**：设置 → 模型/GPU → D3D11VA。
-- **`app_meta.py` URL**：主要用于公告/版本/关于与「前往下载」；`model_manifest_url` 当前指向 123 云盘。应用内一键下载依赖该 manifest；若不可用，请改从 [GitHub Releases — models](https://github.com/6v17/VideoSeek/releases/tag/models) 手动下载后导入。
+- **应用数据**：`~/.videoseek/`（`config.json`、`models/`、`logs/`、`data/`）
+- **日志**：`~/.videoseek/logs/app.log`
+- **虚拟环境**：`~/.videoseek-venv`（故意放在仓库外，避免被 git 和 rsync 带上）
+- **代理**：安装脚本只对 pip 生效；应用内下载走系统代理设置
+- **硬件加速**：上游的 DirectML / D3D11VA 是 Windows 专属，macOS 只能 CPU 推理
+- **版本号规则、打包脚本**：上游内容，本分支不适用，见上游 `docs/quickstart.md`
