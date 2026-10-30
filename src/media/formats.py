@@ -1,5 +1,4 @@
 """Supported library video container suffixes (ingestion whitelist)."""
-
 from __future__ import annotations
 
 import os
@@ -43,3 +42,35 @@ def needs_seekable_preview_proxy(path: str | os.PathLike[str]) -> bool:
     """True when direct player seek on the source container is unreliable."""
     name = os.fspath(path).lower()
     return any(name.endswith(ext) for ext in _MPEG_PROGRAM_STREAM_EXTS)
+
+
+# ---------------------------------------------------------------------------
+# Still images (image library)
+#
+# Photos are indexed by ``image_id`` with no timeline, so they must NOT be added
+# to ``VIDEO_EXTS``: several call sites treat that tuple as "ffprobe can read a
+# duration from it". The image library keeps its own whitelist and its own
+# storage table (``image_assets``), leaving the video pipeline untouched.
+# ---------------------------------------------------------------------------
+IMAGE_EXTS = (
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+    ".bmp",
+    ".tif",
+    ".tiff",
+    ".heic",
+    ".heif",
+    ".avif",
+)
+
+
+def is_supported_image_path(path: str | os.PathLike[str]) -> bool:
+    name = os.fspath(path).lower()
+    return name.endswith(IMAGE_EXTS)
+
+
+def is_supported_media_path(path: str | os.PathLike[str]) -> bool:
+    """True for a video container OR a still image the app can index."""
+    return is_supported_video_path(path) or is_supported_image_path(path)

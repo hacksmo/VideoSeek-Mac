@@ -1,0 +1,381 @@
+"""Image library: format whitelist, description parsing, scanning, Lance storage."""
+
+from __future__ import annotations
+
+import json
+import os
+import unittest
+
+
+from src.media.formats import (
+    IMAGE_EXTS,
+    VIDEO_EXTS,
+    is_supported_image_path,
+    is_supported_media_path,
+    is_supported_video_path,
+)
+from src.services.image_index_service import (
+    _keyword_haystack,
+    _row_to_hit,
+    file_content_id,
+    scan_image_files,
+)
+from src.services.image_understanding import (
+    build_image_prompt,
+    parse_image_description,
+    people_to_text,
+)
+
+
+class ImageFormatTests(unittest.TestCase):
+    def test_image_extensions_are_detected_case_insensitively(self):
+        for name in ("a.jpg", "a.JPEG", "a.PNG", "a.webp", "a.HeIc", "a.avif", "a.tiff"):
+            with self.subTest(name=name):
+                self.assertTrue(is_supported_image_path(name))
+
+    def test_video_containers_are_not_images(self):
+        self.assertFalse(is_supported_image_path("movie.mp4"))
+        self.assertTrue(is_supported_video_path("movie.mp4"))
+        self.assertTrue(is_supported_video_path("movie.MKV"))
+
+    def test_media_helper_covers_both(self):
+        self.assertTrue(is_supported_media_path("still.png"))
+        self.assertTrue(is_supported_media_path("clip.mov"))
+        self.assertFalse(is_supported_media_path("notes.txt"))
+
+    def test_image_extensions_stay_out_of_the_video_whitelist(self):
+        # Several call sites treat VIDEO_EXTS as "ffprobe can read a duration".
+        overlap = set(IMAGE_EXTS) & set(VIDEO_EXTS)
+        self.assertEqual(overlap, set())
+
+
+class ImageDescriptionParseTests(unittest.TestCase):
+    def test_fenced_json_is_parsed(self):
+        raw = """```json
+        {"caption": "窗边的女人", "people": [{"count": 1, "gender": "女", "clothing": "红色连衣裙",
+         "action": "看手机", "position": "画面左侧"}], "tags": ["室内", "红裙", "窗边"]}
+        ```"""
+        parsed = parse_image_description(raw)
+        self.assertTrue(parsed["parse_ok"])
+        self.assertEqual(parsed["caption"], "窗边的女人")
+        self.assertEqual(len(parsed["people"]), 1)
+        self.assertEqual(parsed["people"][0]["clothing"], "红色连衣裙")
+        self.assertEqual(parsed["tags"], ["室内", "红裙", "窗边"])
+
+    def test_json_with_surrounding_prose_is_parsed(self):
+        raw = '好的，结果如下：{"caption": "两个人在海边", "people": [], "tags": ["海边"]} 以上。'
+        parsed = parse_image_description(raw)
+        self.assertTrue(parsed["parse_ok"])
+        self.assertEqual(parsed["caption"], "两个人在海边")
+
+    def test_prose_only_falls_back_to_caption(self):
+        parsed = parse_image_description("一个男人坐在台阶上喝咖啡。")
+        self.assertFalse(parsed["parse_ok"])
+        self.assertEqual(parsed["caption"], "一个男人坐在台阶上喝咖啡。")
+        self.assertEqual(parsed["people"], [])
+
+    def test_empty_reply_is_empty(self):
+        parsed = parse_image_description("")
+        self.assertEqual(parsed["caption"], "")
+        self.assertFalse(parsed["parse_ok"])
+
+    def test_people_as_strings_are_tolerated(self):
+        parsed = parse_image_description(
+            json.dumps({"caption": "c", "people": ["穿蓝衬衫的男子"], "tags": []}, ensure_ascii=False)
+        )
+        self.assertEqual(len(parsed["people"]), 1)
+        self.assertEqual(parsed["people"][0]["count"], 1)
+        self.assertIn("蓝衬衫", parsed["people"][0]["features"])
+
+    def test_count_is_clamped(self):
+        parsed = parse_image_description(
+            json.dumps({"caption": "c", "people": [{"count": "999", "gender": "男"}]})
+        )
+        self.assertEqual(parsed["people"][0]["count"], 99)
+        parsed = parse_image_description(
+            json.dumps({"caption": "c", "people": [{"count": 0, "gender": "男"}]})
+        )
+        self.assertEqual(parsed["people"][0]["count"], 1)
+
+    def test_empty_person_entries_are_dropped(self):
+        parsed = parse_image_description(
+            json.dumps({"caption": "c", "people": [{"count": 1}, {"gender": "女"}], "tags": []})
+        )
+        self.assertEqual(len(parsed["people"]), 1)
+        self.assertEqual(parsed["people"][0]["gender"], "女")
+
+    def test_tags_are_deduped_and_capped(self):
+        tags = ["红裙", "红裙"] + [f"t{index}" for index in range(30)]
+        parsed = parse_image_description(json.dumps({"caption": "c", "tags": tags}))
+        self.assertLessEqual(len(parsed["tags"]), 12)
+        self.assertEqual(len(parsed["tags"]), len(set(parsed["tags"])))
+
+    def test_prompt_carries_the_no_identity_rule(self):
+        self.assertIn("不推测姓名", build_image_prompt("zh"))
+        self.assertIn("Never guess names", build_image_prompt("en"))
+
+
+class PeopleTextTests(unittest.TestCase):
+    def test_single_person_is_flattened(self):
+        text = people_to_text([{"count": 1, "gender": "女", "clothing": "红裙", "position": "左侧"}])
+        self.assertEqual(text, "女 红裙 左侧")
+
+    def test_group_keeps_the_count(self):
+        text = people_to_text([{"count": 3, "gender": "男", "action": "跑步"}])
+        self.assertEqual(text, "3人 男 跑步")
+
+    def test_empty_entries_are_skipped(self):
+        self.assertEqual(people_to_text([{}, {"gender": ""}]), "")
+
+
+class ScanTests(unittest.TestCase):
+    def _make_tree(self, root: str) -> None:
+        os.makedirs(os.path.join(root, "nested", "deeper"), exist_ok=True)
+        for relative in ("a.jpg", "nested/b.PNG", "nested/deeper/c.webp"):
+            with open(os.path.join(root, relative), "wb") as handle:
+                handle.write(b"\x89PNG\r\n")
+        with open(os.path.join(root, "notes.txt"), "w", encoding="utf-8") as handle:
+            handle.write("x")
+        with open(os.path.join(root, ".hidden.jpg"), "wb") as handle:
+            handle.write(b"x")
+        os.makedirs(os.path.join(root, "__MACOSX"), exist_ok=True)
+        with open(os.path.join(root, "__MACOSX", "d.jpg"), "wb") as handle:
+            handle.write(b"x")
+
+    def test_recursive_scan_skips_hidden_and_non_images(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as root:
+            self._make_tree(root)
+            found = scan_image_files(root)
+            names = sorted(os.path.basename(path) for path in found)
+            self.assertEqual(names, ["a.jpg", "b.PNG", "c.webp"])
+
+    def test_non_recursive_scan_only_reads_the_top_level(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as root:
+            self._make_tree(root)
+            found = scan_image_files(root, recursive=False)
+            self.assertEqual([os.path.basename(path) for path in found], ["a.jpg"])
+
+    def test_missing_folder_returns_empty(self):
+        self.assertEqual(scan_image_files("/nonexistent/videoseek/images"), [])
+
+
+class ContentIdTests(unittest.TestCase):
+    def test_identical_content_yields_the_same_id(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as root:
+            first = os.path.join(root, "one.jpg")
+            second = os.path.join(root, "two.jpg")
+            for path in (first, second):
+                with open(path, "wb") as handle:
+                    handle.write(b"same-bytes")
+            self.assertEqual(file_content_id(first), file_content_id(second))
+            self.assertEqual(len(file_content_id(first)), 32)
+            self.assertTrue(all(char in "0123456789abcdef" for char in file_content_id(first)))
+
+    def test_different_content_yields_different_ids(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as root:
+            first = os.path.join(root, "a.jpg")
+            second = os.path.join(root, "b.jpg")
+            with open(first, "wb") as handle:
+                handle.write(b"one")
+            with open(second, "wb") as handle:
+                handle.write(b"two")
+            self.assertNotEqual(file_content_id(first), file_content_id(second))
+
+
+class KeywordRowTests(unittest.TestCase):
+    def test_haystack_covers_caption_people_and_tags(self):
+        row = {
+            "caption": "窗边的女人",
+            "rel_path": "travel/001.jpg",
+            "people_json": json.dumps([{"gender": "女", "clothing": "红裙"}], ensure_ascii=False),
+            "tags_json": json.dumps(["室内"], ensure_ascii=False),
+        }
+        haystack = _keyword_haystack(row)
+        for token in ("窗边", "红裙", "室内", "travel"):
+            self.assertIn(token.casefold(), haystack)
+
+    def test_row_to_hit_parses_and_counts_people(self):
+        row = {
+            "image_id": "a" * 32,
+            "image_path": "/tmp/a.jpg",
+            "rel_path": "a.jpg",
+            "library_root": "/tmp",
+            "caption": "两个人在海边",
+            "people_json": json.dumps([{"count": 2, "gender": "女"}], ensure_ascii=False),
+            "tags_json": json.dumps(["海边"], ensure_ascii=False),
+        }
+        hit = _row_to_hit(row, score=0.5, match="keyword")
+        self.assertEqual(hit["people_count"], 2)
+        self.assertEqual(hit["tags"], ["海边"])
+        self.assertEqual(hit["score"], 0.5)
+
+    def test_broken_json_does_not_raise(self):
+        hit = _row_to_hit({"image_id": "b" * 32, "people_json": "not json"}, score=0.1, match="keyword")
+        self.assertEqual(hit["people"], [])
+        self.assertEqual(hit["people_count"], 0)
+
+
+class ImageStoreRoundTripTests(unittest.TestCase):
+    """Talks to a real (temporary) Lance directory; no video tables involved."""
+
+    def setUp(self):
+        import tempfile
+
+        from src.storage import image_lance_store as store
+
+        self.store = store
+        self._tmp = tempfile.TemporaryDirectory()
+        self._original = store.get_image_lance_dir
+        store.get_image_lance_dir = lambda config=None: os.path.join(  # type: ignore[assignment]
+            self._tmp.name, "lance"
+        )
+
+    def tearDown(self):
+        self.store.get_image_lance_dir = self._original  # type: ignore[assignment]
+        self._tmp.cleanup()
+
+    def _row(self, image_id: str, vector, caption: str, people=None):
+        return {
+            "image_id": image_id,
+            "library_root": "/tmp/root",
+            "image_path": f"/tmp/root/{image_id}.jpg",
+            "rel_path": f"{image_id}.jpg",
+            "mtime": 1.0,
+            "width": 640,
+            "height": 480,
+            "bytes": 1234,
+            "caption": caption,
+            "people_json": json.dumps(people or [], ensure_ascii=False),
+            "tags_json": json.dumps(["tag"], ensure_ascii=False),
+            "describer": "test",
+            "vector": [float(value) for value in vector],
+        }
+
+    def test_schema_declares_the_vector_width(self):
+        schema = self.store.image_table_schema(512)
+        self.assertEqual(schema.field("vector").type.list_size, 512)
+        for column in ("image_id", "caption", "people_json", "tags_json", "rel_path"):
+            self.assertIn(column, schema.names)
+
+    def test_upsert_search_update_delete(self):
+        rows = [
+            self._row("1" * 32, [1.0, 0.0, 0.0, 0.0], "红色连衣裙的女人"),
+            self._row("2" * 32, [0.0, 1.0, 0.0, 0.0], "海边日落"),
+        ]
+        self.assertEqual(self.store.upsert_image_rows(rows), 2)
+
+        stats = self.store.image_index_stats()
+        self.assertEqual(stats["rows"], 2)
+        self.assertEqual(stats["dimension"], 4)
+
+        hits = self.store.search_image_vectors([1.0, 0.0, 0.0, 0.0], top_k=2)
+        self.assertEqual(len(hits), 2)
+        self.assertEqual(hits[0]["image_id"], "1" * 32)
+        self.assertIn("_distance", hits[0])
+
+        # Same id + new caption must update in place, not duplicate.
+        updated = self._row("1" * 32, [1.0, 0.0, 0.0, 0.0], "改过的描述")
+        self.store.upsert_image_rows([updated])
+        self.assertEqual(self.store.image_index_stats()["rows"], 2)
+        row = self.store.get_image_row("1" * 32, columns=["caption"])
+        self.assertEqual(row["caption"], "改过的描述")
+
+        self.store.delete_images(["2" * 32])
+        self.assertEqual(self.store.image_index_stats()["rows"], 1)
+
+    def test_dimension_change_recreates_the_table(self):
+        self.store.upsert_image_rows([self._row("3" * 32, [1.0, 0.0], "两点向量")])
+        self.assertEqual(self.store.image_index_stats()["dimension"], 2)
+        # A new CLIP model with a different width must not corrupt the table.
+        table, dimension = self.store.open_image_table(dimension=3)
+        self.assertEqual(dimension, 3)
+        self.assertEqual(table.schema.field("vector").type.list_size, 3)
+        self.assertEqual(self.store.image_index_stats()["rows"], 0)
+
+    def test_invalid_image_id_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self.store.upsert_image_rows([self._row("not-a-hash", [1.0, 0.0], "x")])
+
+
+class KeywordSearchTests(unittest.TestCase):
+    def test_keyword_search_ranks_by_term_coverage(self):
+        from src.services import image_index_service as service
+
+        rows = [
+            {
+                "image_id": "a" * 32,
+                "image_path": "/tmp/a.jpg",
+                "rel_path": "a.jpg",
+                "library_root": "/tmp",
+                "caption": "穿红裙的女人在窗边",
+                "people_json": json.dumps([{"count": 1, "clothing": "红裙"}], ensure_ascii=False),
+                "tags_json": "[]",
+            },
+            {
+                "image_id": "b" * 32,
+                "image_path": "/tmp/b.jpg",
+                "rel_path": "b.jpg",
+                "library_root": "/tmp",
+                "caption": "海边日落",
+                "people_json": "[]",
+                "tags_json": "[]",
+            },
+        ]
+        original = service.__dict__["search_by_keyword"]
+        from src.storage import image_lance_store as store
+
+        original_iter = store.iter_image_rows
+        store.iter_image_rows = lambda **kwargs: iter(rows)  # type: ignore[assignment]
+        try:
+            hits = original("红裙", top_k=5)
+        finally:
+            store.iter_image_rows = original_iter  # type: ignore[assignment]
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(hits[0]["image_id"], "a" * 32)
+        self.assertEqual(hits[0]["match"], "keyword")
+
+    def test_people_filters(self):
+        from src.services import image_index_service as service
+        from src.storage import image_lance_store as store
+
+        rows = [
+            {
+                "image_id": "a" * 32,
+                "image_path": "/tmp/a.jpg",
+                "rel_path": "a.jpg",
+                "library_root": "/tmp",
+                "caption": "一个人",
+                "people_json": json.dumps([{"count": 1, "gender": "女"}], ensure_ascii=False),
+                "tags_json": "[]",
+            },
+            {
+                "image_id": "b" * 32,
+                "image_path": "/tmp/b.jpg",
+                "rel_path": "b.jpg",
+                "library_root": "/tmp",
+                "caption": "一群人",
+                "people_json": json.dumps([{"count": 5, "gender": "男"}], ensure_ascii=False),
+                "tags_json": "[]",
+            },
+        ]
+        original_iter = store.iter_image_rows
+        store.iter_image_rows = lambda **kwargs: iter(rows)  # type: ignore[assignment]
+        try:
+            many = service.search_by_keyword("人", top_k=5, min_people=3)
+            only_one = service.search_by_keyword("人", top_k=5, max_people=2)
+        finally:
+            store.iter_image_rows = original_iter  # type: ignore[assignment]
+        self.assertEqual([hit["image_id"] for hit in many], ["b" * 32])
+        self.assertEqual([hit["image_id"] for hit in only_one], ["a" * 32])
+
+
+if __name__ == "__main__":
+    unittest.main()

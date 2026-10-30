@@ -33,12 +33,46 @@ Modifications made in this fork (AGPL-3.0 section 5(a)), first published
   - README.md, README.en.md, docs/quickstart.md          [rewritten]
         Rewritten around macOS instead of Windows.
 
+  - src/media/formats.py                                 [additive]
+        IMAGE_EXTS / is_supported_image_path /
+        is_supported_media_path. VIDEO_EXTS is unchanged, so no
+        existing caller changes behaviour.
+
+  - src/storage/image_lance_store.py                     [new]
+        image_assets Lance table (schema, upsert, vector search,
+        row scan, stats, delete). Lives beside the video tables and
+        never reads or writes them.
+
+  - src/services/image_understanding.py                  [new]
+        Structured image description through the configured
+        OpenAI-compatible VLM: caption + people[] + tags[], strict
+        JSON with prose fallback, TCP reachability probe.
+
+  - src/services/image_index_service.py                  [new]
+        Image scan, incremental indexing (CLIP + optional VLM
+        description), text / keyword / image search, status.
+
+  - scripts/image_index.py                               [new]
+        CLI: add / remove / roots / scan / index / search /
+        status / prune.
+
+  - tests/test_image_library.py                          [new]
+        30 cases covering formats, description parsing, scanning,
+        content ids, Lance read/write, keyword and people filters.
+
+  - docs/image-library.md                                [new]
+        Image library: data model, retrieval modes, prompt
+        boundaries, performance, limitations.
+
   - docs/macos-notes.md                                  [new]
         Platform notes, known deltas, troubleshooting, sync policy.
 
   - DEPLOY-macOS.md                                      [removed]
         Content merged into docs/macos-notes.md.
 
+The image library is additive: it adds a new table and new modules and does
+not modify the video indexing, search, export, OCR or Agent API code paths.
+Deleting the image_assets table returns the app to upstream behaviour.
 No functional behaviour changes were made beyond the ffmpeg binary
 detection above. Windows-specific code paths, packaging scripts and the
 installer pipeline are untouched and unsupported here.

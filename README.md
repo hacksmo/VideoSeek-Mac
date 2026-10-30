@@ -34,10 +34,11 @@
 | 启动方式 | `VideoSeek.exe` | 双击 `run-macos.command` |
 | FFmpeg 识别 | 只认 ELF / PE 文件头 | **增加 Mach-O 判断**（不加会在 macOS 上误判为"没有 FFmpeg"） |
 | 播放组件 | `vlc_lib/` 内置 DLL | 复用 `/Applications/VLC.app` 的 libvlc |
+| 图片理解与检索 | 不支持图片文件 | **新增图片库**（独立 `image_assets` 表 + 人物描述），见 [`docs/image-library.md`](docs/image-library.md) |
 | 文档 | Windows 优先 | **全中文 macOS 重写** |
 
-功能层面**没有改动**：索引、搜索、导出、Agent API、云嵌入全部与上游一致。
-只改了一处代码逻辑（FFmpeg 二进制识别），详见 [`docs/macos-notes.md`](docs/macos-notes.md#the-only-code-change)。
+视频链路**没有改动**：索引、搜索、导出、Agent API、云嵌入全部与上游一致。
+改了一处代码逻辑（FFmpeg 二进制识别），另**新增**了图片库（纯增量，不碰视频表）。
 
 ## 三步跑起来
 
@@ -96,9 +97,37 @@ cd ~/Desktop/VideoSeek && ./install-macos.command
 | 搜索很慢 | CPU 推理，无 DirectML / CUDA | 属预期；见 [`docs/macos-notes.md`](docs/macos-notes.md#performance) |
 | 数据存哪 | — | `~/.videoseek/`（`config.json`、`models/`、`logs/`、`data/`） |
 
+## 新增能力：图片库（人物描述可检索）
+
+上游只索引视频。本分支加了一个**独立**的图片库：照片、截图、素材图都能建语义索引，并且不只看图上的文字——每张图会得到一句描述、一组**结构化人物信息**和标签，三种方式都能查。
+
+```bash
+V=~/.videoseek-venv/bin/python
+$V scripts/image_index.py add ~/Pictures/travel    # 登记目录
+$V scripts/image_index.py index                    # CLIP 向量 + VLM 描述
+$V scripts/image_index.py search "穿红裙的女人站在窗边"   # 语义
+$V scripts/image_index.py search "红裙" --mode keyword  # 关键词
+$V scripts/image_index.py search --mode image --image q.jpg  # 以图搜图
+```
+
+人物描述长这样，落在独立字段里（**不放进 tags**，否则会被上游的通用词过滤器当噪声丢掉）：
+
+```json
+{"count": 1, "gender": "女", "age": "青年", "clothing": "红色连衣裙",
+ "action": "站在窗边看手机", "position": "画面左侧", "features": "长发，戴细框眼镜"}
+```
+
+- 复用现有 VLM 配置（LM Studio / Ollama / 任意 OpenAI 兼容端点），**不新增依赖、不下载新模型**
+- 服务没启动时自动降级为"只算向量"，语义检索仍可用，不会把图记成失败
+- 边界：**不做人脸识别、不推测身份姓名职业**，只描述画面可见属性
+- 图片走独立 `image_assets` 表，视频索引一个字节不动
+
+细节（数据模型、性能、维护、局限）见 [`docs/image-library.md`](docs/image-library.md)。
+
 ## 文档
 
 - [`docs/quickstart.md`](docs/quickstart.md) — macOS 从源码安装、手动命令、逐项校验
+- [`docs/image-library.md`](docs/image-library.md) — 图片库：数据模型、三种检索、人物描述、性能、局限
 - [`docs/macos-notes.md`](docs/macos-notes.md) — 代码改动、路径约定、已知差异、排错表、上游同步
 - [`docs/architecture.md`](docs/architecture.md) — 架构（上游原文）
 - [`docs/for-agents.md`](docs/for-agents.md) — localhost Agent API（上游原文）

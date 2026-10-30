@@ -44,9 +44,13 @@ magic_ok = (
 > **升级上游代码后必须确认这段还在。** 如果被覆盖回去，症状是"应用什么都干不了，
 > 但终端里 ffmpeg 明明能用"。
 
-### 除这一处外，没有改动任何功能代码
+### 除这一处外，视频链路没有任何功能改动
 
 索引、检索、OCR、导出、Agent API、云嵌入、UI 全部是上游原样。
+
+唯一的**新增**能力是图片库（`image_assets` 表 + `scripts/image_index.py`），纯增量：
+不读取也不写入 `frames` / `chunks` / `dialogue_segments`，删掉即可完全回到上游状态。
+见 [`image-library.md`](image-library.md)。
 
 <a id="paths"></a>
 
@@ -199,8 +203,11 @@ Intel Mac 未实测。理论上只要 Python 版本合规、依赖有 x86_64 whe
 
 ```bash
 ~/.videoseek-venv/bin/python -m pytest tests/ -q
-# 1624 passed, 21 failed, 7 skipped  (约 1 分 45 秒)
+# 1654 passed, 21 failed, 7 skipped  (约 2 分钟)
 ```
+
+其中 1654 里含图片库新增的 30 个用例。若出现 `FileExistsError: pytest-of-root`，是受限环境里
+mkdir 被拦截导致的，加 `--basetemp=/tmp/…` 换个临时根目录即可，与代码无关。
 
 **那 21 项失败不是本分支引入的，全部是上游按 Windows 语义写的用例**：
 

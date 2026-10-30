@@ -162,7 +162,7 @@ rm -rf ~/.videoseek          # 连数据、模型、日志一起删（谨慎）
 ~/.videoseek-venv/bin/python -m pytest tests/ -q
 ```
 
-macOS 基线是 **1624 passed / 21 failed / 7 skipped**。失败项全部是 Windows 语义用例
+macOS 基线是 **1654 passed / 21 failed / 7 skipped**。失败项全部是 Windows 语义用例
 （长路径、junction、盘符、管理员 Cookie），属于上游既有状态，不是回归。
 判断有没有改坏，只看这个数字有没有变多；原因见 [`macos-notes.md`](macos-notes.md#test-baseline)。
 
