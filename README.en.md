@@ -99,9 +99,30 @@ Double-click **`run-macos.command`**, then:
 | Slow indexing | CPU inference only, no DirectML/CUDA | expected; see [`docs/macos-notes.md`](docs/macos-notes.md#performance) |
 | Where is my data | — | `~/.videoseek/` (`config.json`, `models/`, `logs/`, `data/`) |
 
+## New: unified search over videos and photos
+
+The second sidebar item, **Unified Search**, runs one query against both indexes and
+returns two groups: video moments on top, photos below.
+
+- Videos go through the same engine the Agent API uses (`execute_agent_search`);
+  photos reuse the photo library's three recall channels (attributes → text →
+  vectors). The widget layer implements no retrieval logic of its own.
+- The two sides **fail independently**: a missing video index still returns photos,
+  and vice versa.
+- Double-click a video hit to jump to the search page and play that moment;
+  double-click a photo to open it with the system viewer.
+- No cross-modal re-ranking: video scores (0.3–0.45) and photo attribute scores
+  (0.95+) are not on the same scale, so one merged list would bury every video.
+- Measured on 1262 photos plus the existing video library: `黑色衣服` in 0.85 s,
+  photos-only in 16 ms, 15 s once per process for the CLIP warm-up.
+
+Details in [`docs/unified-search.md`](docs/unified-search.md).
+
 ## Documentation
 
 - [`docs/quickstart.md`](docs/quickstart.md) — macOS from-source setup, manual commands, checks
+- [`docs/image-library.md`](docs/image-library.md) — photo library: data model, three recall channels, captions, limits
+- [`docs/unified-search.md`](docs/unified-search.md) — unified search: how the two sides merge, why no merged ranking
 - [`docs/macos-notes.md`](docs/macos-notes.md) — code change, paths, deltas, troubleshooting, upstream sync
 - [`docs/architecture.md`](docs/architecture.md) — architecture (upstream text)
 - [`docs/for-agents.md`](docs/for-agents.md) — localhost Agent API (upstream text)

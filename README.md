@@ -133,10 +133,23 @@ $V scripts/image_index.py search --mode image --image q.jpg  # 以图搜图
 
 细节（数据模型、界面、缩略图缓存、性能、维护、局限）见 [`docs/image-library.md`](docs/image-library.md)。
 
+## 新增能力：视频 + 图片的统一搜索
+
+侧边栏第二项 **统一搜索**：一个输入框同时查视频片段和图片，结果分组显示（上面视频条、下面图片墙）。
+
+- 视频走 Agent API 那套引擎（`execute_agent_search`），图片走图片库的三级路由（属性 → 文字 → 向量），界面层不重复实现任何检索逻辑
+- 两侧**各自成败**：视频索引没建好，图片照常返回；反过来也一样
+- 双击视频命中 → 切到「搜索」页在播放器里定位这一段；双击图片 → 系统看图打开
+- 不做跨模态混排：视频片段分（0.3–0.45）和图片属性分（0.95+）不在同一把尺子上，混排只会让图片永远压住视频
+- 实测（1262 张素材 + 现有视频库）：`黑色衣服` 0.85 s，只搜图片 16 ms，首次含模型加载 15 s
+
+细节见 [`docs/unified-search.md`](docs/unified-search.md)。
+
 ## 文档
 
 - [`docs/quickstart.md`](docs/quickstart.md) — macOS 从源码安装、手动命令、逐项校验
 - [`docs/image-library.md`](docs/image-library.md) — 图片库：数据模型、三种检索、人物描述、性能、局限
+- [`docs/unified-search.md`](docs/unified-search.md) — 统一搜索：两侧如何合并、为什么不分混排、实测耗时
 - [`docs/macos-notes.md`](docs/macos-notes.md) — 代码改动、路径约定、已知差异、排错表、上游同步
 - [`docs/architecture.md`](docs/architecture.md) — 架构（上游原文）
 - [`docs/for-agents.md`](docs/for-agents.md) — localhost Agent API（上游原文）

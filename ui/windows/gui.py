@@ -53,6 +53,7 @@ from ui.widgets.components import (
 )
 from ui.widgets.understanding_page import UnderstandingEvidencePage
 from ui.widgets.image_library_page import ImageLibraryPage
+from ui.widgets.unified_search_page import UnifiedSearchPage
 from ui.widgets.settings import SettingsPage
 from ui.widgets.scaffold import make_runtime_inline_tip
 from ui.dialogs import AboutDialog, AppMessageDialog, DonateDialog, MobileBridgeDialog, NoticeDialog, SkipEdgesDialog
@@ -121,7 +122,15 @@ class MainWindow(
     Optional plugins may insert pages (e.g. after understanding) via ``src.app.plugins``.
     """
 
-    _BUILTIN_NAV_PAGE_ORDER = ("search", "library", "images", "understanding", "link", "settings")
+    _BUILTIN_NAV_PAGE_ORDER = (
+        "search",
+        "unified",
+        "library",
+        "images",
+        "understanding",
+        "link",
+        "settings",
+    )
 
     def __init__(self):
         super().__init__()
@@ -287,15 +296,21 @@ class MainWindow(
         self.link_page = LinkSearchPage()
         self.library_page = LibraryPage()
         self.images_page = ImageLibraryPage()
+        self.unified_page = UnifiedSearchPage()
         self.understanding_page = UnderstandingEvidencePage()
         self.understanding_services_dialog = self.understanding_page.services_panel
         self.settings_page = SettingsPage()
-        # Built-in page that does not exist in the original sidebar: register its
-        # nav button explicitly, right after the video library.
+        # Two built-in pages that do not exist in the original sidebar: register
+        # their nav buttons explicitly, next to the pages they extend.
         self.sidebar.register_nav_page(
             "images",
             self.texts.get("nav_images", "图片库"),
             insert_after="library",
+        )
+        self.sidebar.register_nav_page(
+            "unified",
+            self.texts.get("nav_unified", "统一搜索"),
+            insert_after="search",
         )
         self._plugin_page_widgets = {}
         self._plugin_page_specs = {}
@@ -317,6 +332,9 @@ class MainWindow(
 
         builtin_widgets = {
             "search": lambda: self._build_scroll_page(self.search_page, pin_to_viewport=True),
+            # Owns its scrolling (list + virtualised grid); an outer QScrollArea
+            # would fight both for the wheel, exactly like the photo page.
+            "unified": lambda: self.unified_page,
             "library": lambda: self._build_scroll_page(self.library_page),
             # Owns its scrolling (virtualised grid); an outer QScrollArea would
             # fight the results list for the wheel.
@@ -338,6 +356,9 @@ class MainWindow(
             else:
                 self.pages.addWidget(widget)
         content_layout.addWidget(self.pages)
+        # A unified-search hit is a video moment: hand it to the normal preview
+        # path so playback, the transport bar and the detail block all agree.
+        self.unified_page.video_activated.connect(self._on_unified_video_activated)
         main_layout.addWidget(self.content, 1)
 
         self.search_page.preview_placeholder.setMinimumHeight(0)
@@ -392,6 +413,8 @@ class MainWindow(
         self.sidebar.btn_page_library.clicked.connect(lambda: self.switch_page("library"))
         if hasattr(self.sidebar, "btn_page_images"):
             self.sidebar.btn_page_images.clicked.connect(lambda: self.switch_page("images"))
+        if hasattr(self.sidebar, "btn_page_unified"):
+            self.sidebar.btn_page_unified.clicked.connect(lambda: self.switch_page("unified"))
         self.sidebar.btn_page_understanding.clicked.connect(lambda: self.switch_page("understanding"))
         self.sidebar.btn_page_settings.clicked.connect(lambda: self.switch_page("settings"))
         self.sidebar.btn_theme.clicked.connect(self.toggle_theme)

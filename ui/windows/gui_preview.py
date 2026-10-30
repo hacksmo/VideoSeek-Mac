@@ -241,6 +241,22 @@ class PreviewGuiMixin:
             on_status=set_status,
         )
 
+    def _on_unified_video_activated(self, hit):
+        """Play a unified-search hit on the fixed preview player.
+
+        The unified page does not own a player (it lives beside the photo grid),
+        and duplicating one would mean a second VLC instance and a second set of
+        transport controls. Switching to the search page and reusing ``handle_play``
+        keeps one player and makes the hit behave exactly like a normal result.
+        """
+        path = str((hit or {}).get("video_path") or "").strip()
+        if not path:
+            return
+        start = float((hit or {}).get("start_sec") or 0.0)
+        end = float((hit or {}).get("end_sec") or start)
+        self.switch_page("search")
+        self.handle_play(path, start, end)
+
     def _play_fixed_search_preview(self, path, start, end, set_status) -> bool:
         """Play in the side column on the fixed player. The embedded preview stays separate."""
         if getattr(self, "_search_preview_embedded", False):

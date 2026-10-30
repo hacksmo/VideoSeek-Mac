@@ -24,6 +24,12 @@ class ApplyTextsGuiMixin:
         nav_images = self.sidebar.nav_button("images")
         if nav_images is not None:
             nav_images.setText(t.get("nav_images", "图片库"))
+        nav_unified = self.sidebar.nav_button("unified")
+        if nav_unified is not None:
+            nav_unified.setText(t.get("nav_unified", "统一搜索"))
+        unified_page = getattr(self, "unified_page", None)
+        if unified_page is not None:
+            unified_page.apply_texts(getattr(self, "language", "zh"))
         images_page = getattr(self, "images_page", None)
         if images_page is not None:
             images_page.apply_texts(getattr(self, "language", "zh"))

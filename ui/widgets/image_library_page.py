@@ -75,6 +75,10 @@ CELL_HEIGHT = 214
 # does not build a million-key dicts on every page open. Search is unbounded.
 BROWSE_LIMIT = 20000
 
+# Rows the thumbnail pump fills without user scrolling. Beyond this the grid
+# repaints on scroll anyway, so decoding ahead would just burn disk.
+_THUMB_PUMP_ROWS = 120
+
 _STRINGS = {
     "zh": {
         "title": "图片库",
@@ -434,6 +438,11 @@ class ImageGridModel(QAbstractListModel):
             return self._keys[row]
         return ""
 
+    def has_thumb(self, row: int) -> bool:
+        """Whether this row's pixmap already arrived (the loader drops over-cap requests)."""
+        key = self.key_for_row(row)
+        return bool(key) and key in self._thumbs
+
     def set_thumb(self, key: str, pixmap: QPixmap) -> None:
         self._thumbs[key] = pixmap
         rows = self._key_rows.get(key) or []
@@ -683,6 +692,10 @@ class ImageLibraryPage(PageScaffold):
         self._note = ""
         self._detail_key = ""
         self._roots: list[str] = []
+        self._pump_ticks = 0
+        self._thumb_pump = QTimer(self)
+        self._thumb_pump.setInterval(200)
+        self._thumb_pump.timeout.connect(self._pump_thumbs)
 
         self.setAcceptDrops(True)
         self.header.title.setText(self._t["title"])
@@ -964,6 +977,32 @@ class ImageLibraryPage(PageScaffold):
         self._model.set_thumb(key, pixmap)
         if self._detail_key and key == self._detail_key:
             self._paint_detail_image(pixmap)
+
+    # -- thumbnail pump -------------------------------------------------
+    def _start_thumb_pump(self) -> None:
+        """Fill every result cell, not just the ones that happen to repaint.
+
+        ``ImageThumbLoader`` caps in-flight work at 8 and drops anything beyond
+        it, relying on the next repaint to ask again. A grid the user is not
+        touching never repaints, so a fresh "browse all" used to leave most
+        cells on the ``…`` placeholder until the user scrolled.
+        """
+        self._pump_ticks = 0
+        self._thumb_pump.start()
+
+    def _pump_thumbs(self) -> None:
+        model = self._model
+        # Only the first screens. "Browse all" can hold 20k rows, and decoding a
+        # thumbnail for every one of them is minutes of disk work for cells the
+        # user will never see; scrolling repaints and requests those on demand.
+        limit = min(model.rowCount(), _THUMB_PUMP_ROWS)
+        missing = [row for row in range(limit) if not model.has_thumb(row)]
+        if not missing or self._pump_ticks >= 200:
+            self._thumb_pump.stop()
+            return
+        self._pump_ticks += 1
+        for row in missing[:8]:
+            self.request_thumb(model.hit_at(row))
 
     # -- language -------------------------------------------------------
     def apply_texts(self, language: str = "") -> None:
@@ -1373,6 +1412,8 @@ class ImageLibraryPage(PageScaffold):
         self._model.set_hits(hits, keys)
         count = len(hits)
         if count:
+            self._start_thumb_pump()
+        if count:
             self.grid.setCurrentIndex(self._model.index(0))
             note = ""
             if mode == "text" and self._is_vector_only_guess(hits):
@@ -1533,6 +1574,7 @@ class ImageLibraryPage(PageScaffold):
         QTimer.singleShot(150, lambda: self._run_search("browse", ""))
     def shutdown(self) -> None:
         """Stop background work before the page (or the app) goes away."""
+        self._thumb_pump.stop()
         deadline = time.time() + 4.0
         for name in (
             "_index_worker",

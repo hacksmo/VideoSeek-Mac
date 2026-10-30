@@ -198,6 +198,39 @@ Modifications made in this fork (AGPL-3.0 section 5(a)), first published
         model-switched rows, --no-describe, --force, the no-read fast
         path, and the staleness rules.
 
+  - src/services/unified_search.py                       [new]
+        One query over both indexes: video moments through the Agent
+        API's execute_agent_search, photos through
+        image_index_service.search_by_query. Each side records its own
+        error, so a missing video index never blanks the photos.
+
+  - ui/widgets/unified_search_page.py                    [new]
+        The unified search page: search card with a scope selector, a
+        video strip (QAbstractListModel + delegate; QListWidget ignores
+        setGridSize under Qt 6 and collapses a cell to one text line) and
+        the photo library's own grid model/delegate below it. Double-click
+        hands a video hit to the existing preview player.
+
+  - ui/windows/gui.py, gui_preview.py, gui_apply_texts.py [additive]
+        Registers the "unified" nav page after "search", connects the page
+        to handle_play(), and refreshes its strings on a language switch.
+
+  - ui/widgets/image_library_page.py                     [additive]
+        ImageGridModel.has_thumb() plus a 200 ms thumbnail pump: the
+        loader drops requests above its in-flight cap and relies on a
+        repaint, which a still grid never performs.
+
+  - src/app/i18n.py                                      [additive]
+        nav_unified string (zh/en).
+
+  - tests/test_unified_search.py                         [new]
+        19 cases: scope normalisation, hit shaping, per-side failure,
+        channel labelling, page fill, language switch, thumbnail pump.
+
+  - docs/unified-search.md                               [new]
+        Why the two indexes are merged in the service layer, why the
+        results are not re-ranked together, measured timings, limits.
+
   - docs/image-library.md                                [new]
         Image library: data model, in-app UI, retrieval modes, Chinese
         query routing, attribute search, prompt boundaries,
