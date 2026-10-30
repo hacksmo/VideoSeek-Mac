@@ -177,6 +177,27 @@ Modifications made in this fork (AGPL-3.0 section 5(a)), first published
         Double-clickable launcher for a local Ollama server that does
         not depend on launchd, which is refused in some sandboxes.
 
+  - src/services/image_index_service.py                  [extended]
+        Incremental indexing without re-reading the drive. A path ->
+        row map is preloaded from metadata, so a photo whose path and
+        mtime still match reuses its stored image_id and skips the
+        content hash: 1261 of 1268 files on the test library took that
+        path, 3 ms of comparison against 23 s of SHA-1 over the whole
+        folder. New or changed files are still hashed, so content
+        dedupe is unchanged.
+
+  - src/services/image_index_service.py                  [extended]
+        _describer_is_stale(): switching the VLM now rewrites the
+        descriptions on the next plain index run. Skipping is keyed on
+        mtime, so before this a library described by 4b stayed on 4b
+        unless the user passed --force, which also re-encodes every
+        vector -- minutes of work for a text-only change.
+
+  - tests/test_image_index_incremental.py                [new]
+        14 cases: new / untouched / touched / clip-only / unparsed /
+        model-switched rows, --no-describe, --force, the no-read fast
+        path, and the staleness rules.
+
   - docs/image-library.md                                [new]
         Image library: data model, in-app UI, retrieval modes, Chinese
         query routing, attribute search, prompt boundaries,

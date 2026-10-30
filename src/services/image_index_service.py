@@ -46,6 +46,24 @@ MANIFEST_NAME = "library.json"
 # Such a row holds prose, not structured fields, so it is worth another pass.
 UNPARSED_SUFFIX = ":unparsed"
 
+
+def _describer_is_stale(existing: str, current: str) -> bool:
+    """True when a row was described by a different model than the configured one.
+
+    Skipping is otherwise keyed on mtime, so after a model upgrade every row
+    still looks finished and the library stays on the old captions until
+    someone passes ``--force`` -- which also re-encodes every vector, minutes
+    of work for a change that only affects text.
+    """
+    if not current:
+        return False
+    base = str(existing or "").removesuffix(UNPARSED_SUFFIX)
+    if not base.startswith("vlm:"):
+        # clip-only / vlm-error rows carry no model, and the skip check already
+        # redoes them for having no caption.
+        return False
+    return base != current
+
 # Image files are small; a full content hash is the cheapest way to get a stable
 # id and free de-duplication. Chunked so a 200 MB TIFF does not sit in RAM.
 _HASH_CHUNK = 1 << 20
@@ -301,6 +319,16 @@ def index_images(
             describe_reason = reason
             logger.info("Image descriptions disabled: %s", reason)
 
+    current_describer = ""
+    if describe_enabled:
+        from src.services.understanding_resource_service import get_remote_vlm_settings
+
+        try:
+            model = str(get_remote_vlm_settings(config).get("model") or "").strip()
+        except Exception:  # pragma: no cover - defensive
+            model = ""
+        current_describer = f"vlm:{model}" if model else "vlm"
+
     staged: list[tuple[dict, Any]] = []
 
     def _flush(pool: ThreadPoolExecutor) -> None:
@@ -344,6 +372,21 @@ def index_images(
             logger.error("Image upsert failed: %s", exc, exc_info=True)
         staged.clear()
 
+    # Path -> row index, so an unchanged photo does not have to be re-read to
+    # learn it is unchanged. Hashing 1262 photos on an external drive costs
+    # ~23 s of pure disk I/O; the metadata scan below costs ~30 ms.
+    known_by_path: dict[str, dict] = {}
+    try:
+        for row in store.iter_image_rows(
+            config=config,
+            columns=["image_id", "image_path", "mtime", "caption", "describer"],
+        ):
+            path_key = str(row.get("image_path") or "")
+            if path_key:
+                known_by_path[path_key] = row
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("Could not preload image rows: %s", exc)
+
     with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="vs-image-vlm") as pool:
         for position, path in enumerate(paths, start=1):
             if should_stop and should_stop():
@@ -356,17 +399,28 @@ def index_images(
                     logger.debug("Progress callback raised", exc_info=True)
             try:
                 file_stat = os.stat(path)
-                image_id = file_content_id(path)
-                existing = store.get_image_row(
-                    image_id,
-                    config=config,
-                    columns=["image_id", "mtime", "caption", "describer"],
+                known = known_by_path.get(path)
+                if known and abs(float(known.get("mtime") or 0) - float(file_stat.st_mtime)) < 1e-6:
+                    # Same path, same mtime: the row already knows its id, so
+                    # the content hash (and the full file read) is redundant.
+                    image_id = str(known.get("image_id") or "")
+                    existing = known
+                else:
+                    image_id = file_content_id(path)
+                    existing = store.get_image_row(
+                        image_id,
+                        config=config,
+                        columns=["image_id", "mtime", "caption", "describer"],
+                    )
+                existing_describer = str((existing or {}).get("describer") or "")
+                needs_retry = (
+                    UNPARSED_SUFFIX in existing_describer
+                    or (describe_enabled and _describer_is_stale(existing_describer, current_describer))
                 )
-                unparsed = UNPARSED_SUFFIX in str((existing or {}).get("describer") or "")
                 if (
                     existing
                     and not force
-                    and not unparsed
+                    and not needs_retry
                     and abs(float(existing.get("mtime") or 0) - float(file_stat.st_mtime)) < 1e-6
                     and (not describe_enabled or str(existing.get("caption") or "").strip())
                 ):
