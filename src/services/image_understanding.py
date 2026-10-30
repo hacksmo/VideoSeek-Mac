@@ -34,7 +34,16 @@ MAX_PEOPLE = 12
 MAX_TAGS = 12
 MAX_TAG_CHARS = 24
 
-_PERSON_TEXT_FIELDS = ("gender", "age", "clothing", "action", "position", "features")
+_PERSON_TEXT_FIELDS = (
+    "gender",
+    "age",
+    "clothing",
+    "build",
+    "style",
+    "action",
+    "position",
+    "features",
+)
 
 _PROMPT_ZH = """你是图像标注员。只描述画面上**看得见**的内容，输出严格 JSON，不要解释、不要 Markdown 代码块。
 
@@ -46,7 +55,9 @@ _PROMPT_ZH = """你是图像标注员。只描述画面上**看得见**的内容
       "count": 1,
       "gender": "女|男|不确定",
       "age": "儿童|少年|青年|中年|老年|不确定",
-      "clothing": "主要服饰与颜色，例如 红色连衣裙",
+      "clothing": "主要服饰与颜色，例如 米色针织衫配白裤",
+      "build": "偏胖|微胖|匀称|偏瘦|不确定",
+      "style": "花哨|素净|正装|休闲|运动|不确定",
       "action": "正在做什么，例如 站在窗边看手机",
       "position": "画面左侧|画面中间|画面右侧|背景",
       "features": "其它可辨识特征：发型、眼镜、帽子、口罩、背包等"
@@ -58,7 +69,8 @@ _PROMPT_ZH = """你是图像标注员。只描述画面上**看得见**的内容
 规则：
 - 画面里没有人时，people 必须是空数组。
 - 多人同行可合并成一条并写 count；特征明显不同的人分开写。
-- 不推测姓名、身份、职业、情绪、关系，不评价外貌。
+- 不推测姓名、身份、职业、情绪、关系，不评价美丑，不评判身材好坏。
+- build 只按可见轮廓中性归类；看不到全身或穿宽松外套时写 "不确定"。
 - 看不清的字段写 "不确定"，不要编造。
 - tags 用短词，不要整句。"""
 
@@ -72,7 +84,9 @@ Shape:
       "count": 1,
       "gender": "female|male|uncertain",
       "age": "child|teen|young adult|middle-aged|senior|uncertain",
-      "clothing": "main garments and colours, e.g. red dress",
+      "clothing": "main garments and colours, e.g. beige knit sweater with white trousers",
+      "build": "heavy|plump|average|slim|uncertain",
+      "style": "flashy|plain|formal|casual|sporty|uncertain",
       "action": "what they are doing, e.g. standing by the window looking at a phone",
       "position": "left|center|right|background",
       "features": "other visible cues: hair, glasses, hat, mask, backpack"
@@ -84,7 +98,8 @@ Shape:
 Rules:
 - Empty people array when nobody is visible.
 - Merge a group of similar people into one entry with count; split clearly different people.
-- Never guess names, identity, occupation, mood or relationships. Do not rate appearance.
+- Never guess names, identity, occupation, mood or relationships. Do not rate looks or judge body shape.
+- build is a neutral silhouette call; use "uncertain" for a head-and-shoulders crop or a loose coat.
 - Use "uncertain" for anything you cannot see; do not invent.
 - Tags are short words, not sentences."""
 
@@ -203,7 +218,7 @@ def people_to_text(people: Sequence[Mapping[str, Any]]) -> str:
     for person in people or []:
         bits = [
             str(person.get(field) or "").strip()
-            for field in ("gender", "age", "clothing", "action", "position", "features")
+            for field in _PERSON_TEXT_FIELDS
         ]
         text = " ".join(bit for bit in bits if bit)
         if not text:
@@ -270,9 +285,15 @@ def describe_image_bgr(
                 ],
             }
         ],
-        "max_tokens": max(128, min(768, int(settings.get("max_tokens", 192) or 192) * 3)),
+        # A group photo with build/style on every person runs past 576 tokens,
+        # and a truncated reply parses as plain text -- i.e. the description is
+        # silently lost. Cap generously; the model stops when the JSON closes.
+        "max_tokens": max(384, min(1024, int(settings.get("max_tokens", 192) or 192) * 4)),
         "temperature": 0.1,
     }
+    prefill = _json_prefill(settings)
+    if prefill:
+        payload["messages"].append({"role": "assistant", "content": prefill})
 
     import urllib.error
     import urllib.request
@@ -306,7 +327,26 @@ def describe_image_bgr(
     text = str(message.get("content") or message.get("reasoning_content") or "").strip()
     if not text:
         raise RuntimeError("remote VLM returned empty content")
+    if prefill and not text.lstrip().startswith("{"):
+        # The seeded brace is echoed back by some servers and stripped by
+        # others; put it back only when the reply starts mid-object.
+        text = prefill + text
     return parse_image_description(text)
+
+
+def _json_prefill(settings: Mapping[str, Any]) -> str:
+    """Seed the assistant turn so a thinking model skips its reasoning block.
+
+    Ollama's ``qwen3-vl`` ships the ``qwen3-vl-thinking`` renderer, which emits a
+    think block before answering. ``think: false`` is ignored there (checked on
+    0.40.13, native and OpenAI routes alike), so with a normal token budget the
+    reply is *all* reasoning and ``content`` comes back empty. Handing the model
+    an opening brace as its first assistant token makes it continue straight
+    into the JSON: 15-25 s per image becomes ~3 s.
+    """
+    if str(settings.get("provider_preset") or "") != "ollama":
+        return ""
+    return "{"
 
 
 def _endpoint_reachable(base_url: str, *, timeout_sec: float = 0.35) -> tuple[bool, str]:

@@ -71,6 +71,7 @@ DEFAULT_REMOTE_VLM_CONFIG = {
     "timeout_sec": 120,
     "max_tokens": 192,
     "concurrency": 2,
+    "upload_max_long_edge": 0,
 }
 
 REMOTE_VLM_MODE_LOCAL = "local"
@@ -589,6 +590,16 @@ def finalize_remote_vlm_settings(raw_remote_vlm: Mapping[str, Any] | None) -> di
         remote_vlm["concurrency"] = max(1, min(4, int(raw_remote_vlm.get("concurrency", remote_vlm.get("concurrency", 2)))))
     except (TypeError, ValueError):
         remote_vlm["concurrency"] = int(DEFAULT_REMOTE_VLM_CONFIG["concurrency"])
+    # Uploaded long edge. 0 keeps the component default (1920 local / 2048
+    # cloud); a smaller value cuts vision tokens, which is the main lever on
+    # latency for a local model. 896 measured 3.9 s vs 5.9 s per photo on an M5
+    # with qwen3-vl:4b, and the captions were indistinguishable.
+    try:
+        remote_vlm["upload_max_long_edge"] = max(
+            0, min(4096, int(raw_remote_vlm.get("upload_max_long_edge", 0) or 0))
+        )
+    except (TypeError, ValueError):
+        remote_vlm["upload_max_long_edge"] = 0
     mode, preset = resolve_remote_vlm_provider_settings(raw_remote_vlm)
     remote_vlm["provider_mode"] = mode
     remote_vlm["provider_preset"] = preset

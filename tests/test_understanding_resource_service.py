@@ -713,5 +713,38 @@ class UnderstandingCaptionLanguageTests(unittest.TestCase):
         self.assertFalse(probe.get("reachable"))
 
 
+class RemoteVlmUploadEdgeTests(unittest.TestCase):
+    """The upload long edge is the main latency lever for a local VLM.
+
+    It has to survive ``finalize_remote_vlm_settings`` -- an unknown key is
+    dropped silently, which looks exactly like "the setting did nothing".
+    """
+
+    def test_default_is_zero_meaning_component_default(self):
+        settings = understanding_resource_service.finalize_remote_vlm_settings({})
+        self.assertEqual(settings["upload_max_long_edge"], 0)
+
+    def test_configured_edge_is_kept(self):
+        settings = understanding_resource_service.finalize_remote_vlm_settings(
+            {"upload_max_long_edge": 896}
+        )
+        self.assertEqual(settings["upload_max_long_edge"], 896)
+
+    def test_out_of_range_and_garbage_fall_back(self):
+        cases = {
+            -1: 0,
+            99999: 4096,
+            "abc": 0,
+            None: 0,
+            "1024": 1024,
+        }
+        for raw, expected in cases.items():
+            with self.subTest(raw=raw):
+                settings = understanding_resource_service.finalize_remote_vlm_settings(
+                    {"upload_max_long_edge": raw}
+                )
+                self.assertEqual(settings["upload_max_long_edge"], expected)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -24,6 +24,7 @@ from src.services.image_index_service import (
     scan_image_files,
 )
 from src.services.image_understanding import (
+    _json_prefill,
     build_image_prompt,
     parse_image_description,
     people_to_text,
@@ -117,6 +118,36 @@ class ImageDescriptionParseTests(unittest.TestCase):
         self.assertIn("不推测姓名", build_image_prompt("zh"))
         self.assertIn("Never guess names", build_image_prompt("en"))
 
+    def test_build_and_style_survive_parsing(self):
+        parsed = parse_image_description(
+            json.dumps(
+                {
+                    "caption": "两人在街边合影",
+                    "people": [
+                        {"count": 1, "gender": "女", "clothing": "米色风衣", "build": "偏瘦", "style": "素净"},
+                    ],
+                    "tags": [],
+                },
+                ensure_ascii=False,
+            )
+        )
+        person = parsed["people"][0]
+        self.assertEqual(person["build"], "偏瘦")
+        self.assertEqual(person["style"], "素净")
+
+    def test_prompt_asks_for_build_and_style_neutral(self):
+        prompt = build_image_prompt("zh")
+        self.assertIn("偏胖|微胖|匀称|偏瘦", prompt)
+        self.assertIn("不评判身材好坏", prompt)
+
+    def test_only_ollama_gets_a_json_prefill(self):
+        # qwen3-vl on Ollama always emits a think block and ignores think:false,
+        # so the assistant turn is seeded with "{". Other providers must not be
+        # touched -- a trailing assistant message is not universally accepted.
+        self.assertEqual(_json_prefill({"provider_preset": "ollama"}), "{")
+        self.assertEqual(_json_prefill({"provider_preset": "lm_studio"}), "")
+        self.assertEqual(_json_prefill({}), "")
+
 
 class PeopleTextTests(unittest.TestCase):
     def test_single_person_is_flattened(self):
@@ -126,6 +157,11 @@ class PeopleTextTests(unittest.TestCase):
     def test_group_keeps_the_count(self):
         text = people_to_text([{"count": 3, "gender": "男", "action": "跑步"}])
         self.assertEqual(text, "3人 男 跑步")
+
+    def test_build_and_style_are_searchable(self):
+        text = people_to_text([{"count": 1, "gender": "男", "build": "偏胖", "style": "花哨"}])
+        self.assertIn("偏胖", text)
+        self.assertIn("花哨", text)
 
     def test_empty_entries_are_skipped(self):
         self.assertEqual(people_to_text([{}, {"gender": ""}]), "")

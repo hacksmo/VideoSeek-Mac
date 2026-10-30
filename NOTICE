@@ -148,6 +148,35 @@ Modifications made in this fork (AGPL-3.0 section 5(a)), first published
         Attribute hint under the search row; the result line says which
         attributes were applied and flags the height caveat.
 
+  - src/services/image_understanding.py                  [extended]
+        Two extra per-person fields, build and style, each a small
+        closed vocabulary, so 偏胖 / 花哨 become searchable text and
+        not just vectors; both prompts say the call is a neutral
+        silhouette judgement and never a rating. people_to_text()
+        iterates _PERSON_TEXT_FIELDS so the new fields reach the
+        keyword index. Token budget raised for a group photo that now
+        carries eight fields per person.
+
+  - src/services/image_understanding.py                  [extended]
+        _json_prefill(): Ollama's qwen3-vl ships the *-thinking
+        renderer, which ignores think:false, reasoning_effort:none and
+        enable_thinking alike -- the whole reply lands in
+        message.reasoning and content comes back empty. Seeding the
+        assistant turn with "{" makes the model continue straight
+        into the JSON: 15-25 s per image becomes ~3 s. Gated on
+        provider_preset == "ollama", because a trailing assistant turn
+        is not accepted by every OpenAI-compatible server.
+
+  - src/services/understanding_resource_service.py       [extended]
+        upload_max_long_edge (0 = component default) survives
+        finalize_remote_vlm_settings; it is the main latency lever
+        for a local VLM. 896 px measured 3.9 s vs 5.9 s per photo at
+        1920 px on an M5, with no visible change in the captions.
+
+  - start-ollama.command                                 [new]
+        Double-clickable launcher for a local Ollama server that does
+        not depend on launchd, which is refused in some sandboxes.
+
   - docs/image-library.md                                [new]
         Image library: data model, in-app UI, retrieval modes, Chinese
         query routing, attribute search, prompt boundaries,
