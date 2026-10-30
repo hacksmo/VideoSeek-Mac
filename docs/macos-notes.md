@@ -190,3 +190,37 @@ git merge upstream/master
 | 自检 | `model_ready` / `ffmpeg_ready` / `resources_ready` 均为 True |
 
 Intel Mac 未实测。理论上只要 Python 版本合规、依赖有 x86_64 wheel 就能跑，欢迎反馈。
+
+<a id="test-baseline"></a>
+
+## 10. 测试基线（Test baseline）
+
+在 macOS / arm64 / Python 3.13 上跑完整套件：
+
+```bash
+~/.videoseek-venv/bin/python -m pytest tests/ -q
+# 1624 passed, 21 failed, 7 skipped  (约 1 分 45 秒)
+```
+
+**那 21 项失败不是本分支引入的，全部是上游按 Windows 语义写的用例**：
+
+| 用例组 | 依赖的 Windows 行为 |
+|--------|---------------------|
+| `test_windows_long_path.py` | `\\?\` 长路径前缀 |
+| `test_export_path_guard.py` | NTFS junction 逃逸检测 |
+| `test_utils.py` / `test_services_indexing.py` | 路径大小写不敏感、盘符、父子目录重叠判定 |
+| `test_pc_migrate_service.py` | 换机迁移的注册表 / 盘符重映射 |
+| `test_video_download_service.py` | 浏览器 Cookie 需管理员权限的预检提示 |
+| `test_inline_field_labels.py` / `test_subtitle_srt_import.py` / `test_services_utils_extra.py` | 字体度量快照、安装目录形态 |
+
+所以：**判断 macOS 回归只要看这个数字有没有变多**，不用逐条修 Windows 用例。
+要跑"macOS 相关"子集：
+
+```bash
+~/.videoseek-venv/bin/python -m pytest tests/ -q \
+  --ignore=tests/test_windows_long_path.py \
+  --ignore=tests/test_export_path_guard.py \
+  --ignore=tests/test_pc_migrate_service.py
+```
+
+`.github/workflows/test.yml` 是**上游的 Windows 流水线**，本分支未改动；GitHub 默认不会在 fork 上运行它。
