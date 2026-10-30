@@ -161,7 +161,7 @@ git merge upstream/master
 | 文件 | 冲突概率 | 处理 |
 |------|----------|------|
 | `src/infra/ffmpeg_paths.py` | **中**（上游若动这块必冲突） | 保留 Mach-O 分支 |
-| `README.md` / `README.zh.md` / `docs/quickstart.md` | 高 | 直接保留本分支版本（`git checkout --ours`） |
+| `README.md` / `README.en.md` / `docs/quickstart.md` | 高 | 直接保留本分支版本（`git checkout --ours`） |
 | `NOTICE` | 中 | 保留本分支版本，上游版权行不动 |
 | 其它 | 低 | 正常合并 |
 

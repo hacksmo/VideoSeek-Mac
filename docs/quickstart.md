@@ -2,7 +2,7 @@
 
 本文件只讲 **macOS**。Windows 请回上游：[`6v17/VideoSeek`](https://github.com/6v17/VideoSeek)。
 
-- 只想用 → 看 [README](../README.zh.md)
+- 只想用 → 看 [README](../README.md)
 - 想看为什么这么改、踩过哪些坑 → 看 [`macos-notes.md`](macos-notes.md)
 
 ---

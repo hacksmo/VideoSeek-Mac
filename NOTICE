@@ -30,7 +30,7 @@ Modifications made in this fork (AGPL-3.0 section 5(a)), first published
         3.11-3.13 interpreter, mirror/proxy aware dependency install,
         libvlc environment for VLC.app, version sanity checks.
 
-  - README.md, README.zh.md, docs/quickstart.md          [rewritten]
+  - README.md, README.en.md, docs/quickstart.md          [rewritten]
         Rewritten around macOS instead of Windows.
 
   - docs/macos-notes.md                                  [new]
