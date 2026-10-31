@@ -189,3 +189,17 @@ same license; changes are listed in [NOTICE](NOTICE) as required by AGPL section
 </p>
 
 </details>
+
+## Support this macOS fork
+
+If this macOS port helped you, feel free to buy me a coffee or get in touch:
+
+<p align="center">
+  <img src="docs/assets/donate.jpg" alt="Donate QR" width="240">
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="docs/assets/contact.jpg" alt="Contact QR" width="240">
+</p>
+
+<p align="center">
+  Left: donation (WeChat) &nbsp;·&nbsp; Right: contact (WeChat)
+</p>

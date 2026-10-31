@@ -209,3 +209,17 @@ git fetch upstream && git merge upstream/master
 </p>
 
 </details>
+
+## 支持这个 macOS 分支
+
+如果你觉得这个 macOS 适配帮到了你，欢迎赞赏或联系交流：
+
+<p align="center">
+  <img src="docs/assets/donate.jpg" alt="赞赏码" width="240">
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="docs/assets/contact.jpg" alt="联系二维码" width="240">
+</p>
+
+<p align="center">
+  左：赞赏码（开发不易，请我喝杯咖啡）　右：微信联系（极墨信息技术咨询工作室）
+</p>
