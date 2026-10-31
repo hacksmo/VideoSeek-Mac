@@ -16,8 +16,6 @@ Design notes
 from __future__ import annotations
 
 import os
-import subprocess
-import sys
 import time
 import weakref
 
@@ -62,6 +60,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui import file_actions
 from ui.widgets.button_roles import set_button_role
 from ui.widgets.scaffold import PageScaffold, VSCard, VSProgressStatusRow
 
@@ -141,6 +140,11 @@ _STRINGS = {
         "confirm_big_body": "本次将处理 {count} 张照片，可能要跑很久。继续吗？",
         "no_files": "没有发现可索引的照片。",
         "drop_hint": "也可以把照片文件夹拖进来登记，或把一张图片拖进来做以图搜图。",
+        "grid_hint": "直接把图片拖到剪映等应用即可导入；右键：在访达中显示 / 复制路径。",
+        "menu_reveal": "在访达中显示",
+        "menu_copy_path": "复制文件路径",
+        "menu_open": "用默认应用打开",
+        "menu_missing": "原文件当前不可达（硬盘没挂载？）",
     },
     "en": {
         "title": "Photo Library",
@@ -203,6 +207,11 @@ _STRINGS = {
         "confirm_big_body": "About to index {count} photos. This can take a while. Continue?",
         "no_files": "No indexable photos found.",
         "drop_hint": "You can also drop a photo folder here, or drop one image to search by it.",
+        "grid_hint": "Drag a photo straight into another app to import it; right-click to reveal or copy its path.",
+        "menu_reveal": "Reveal in Finder",
+        "menu_copy_path": "Copy file path",
+        "menu_open": "Open with default app",
+        "menu_missing": "The source file is unreachable right now (external drive unmounted?)",
     },
 }
 
@@ -225,19 +234,6 @@ def _human_duration(seconds: float) -> str:
         return f"{minutes}m{secs:02d}s"
     hours, minutes = divmod(minutes, 60)
     return f"{hours}h{minutes:02d}m"
-
-
-def _reveal_in_file_manager(path: str) -> None:
-    if not path:
-        return
-    if sys.platform == "darwin":
-        try:
-            subprocess.Popen(["open", "-R", path])
-            return
-        except OSError:
-            pass
-    folder = path if os.path.isdir(path) else os.path.dirname(path)
-    QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
 
 
 def _people_text(person: dict) -> str:
@@ -390,6 +386,10 @@ class _StatusWorker(QThread):
 class ImageGridModel(QAbstractListModel):
     """Holds hit dicts and the pixmaps already decoded for them."""
 
+    # Dragging copies: the target is another app, never this library. Dropping
+    # onto ourselves would have no meaning, so views set DragOnly.
+    DRAG_FIELD = "image_path"
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._hits: list[dict] = []
@@ -409,11 +409,29 @@ class ImageGridModel(QAbstractListModel):
             return hit
         if role == THUMB_ROLE:
             return self._thumbs.get(self._keys[index.row()])
+        if role == Qt.ItemDataRole.DecorationRole:
+            # QAbstractItemView.startDrag builds its drag image from this.
+            return self._thumbs.get(self._keys[index.row()])
         if role == Qt.ItemDataRole.DisplayRole:
             return hit.get("caption") or hit.get("rel_path") or hit.get("image_path") or ""
         if role == Qt.ItemDataRole.ToolTipRole:
             return hit.get("caption") or hit.get("image_path") or ""
         return None
+
+    def mimeData(self, indexes):  # noqa: N802 - Qt API
+        from ui.file_actions import file_mime_data
+
+        paths = []
+        for index in indexes or ():
+            if index.isValid() and 0 <= index.row() < len(self._hits):
+                paths.append(self._hits[index.row()].get(self.DRAG_FIELD) or "")
+        return file_mime_data(paths)
+
+    def mimeTypes(self) -> list[str]:  # noqa: N802 - Qt API
+        return ["text/uri-list", "text/plain"]
+
+    def supportedDragActions(self) -> Qt.DropAction:  # noqa: N802 - Qt API
+        return Qt.DropAction.CopyAction
 
     # -- model API ------------------------------------------------------
     def set_hits(self, hits, keys) -> None:
@@ -846,6 +864,13 @@ class ImageLibraryPage(PageScaffold):
         self.lbl_search_status.setWordWrap(True)
         column.addWidget(self.lbl_search_status)
 
+        # Persistent, unlike the status line above: this one says what you can do
+        # with a hit, and nothing else ever overwrites it.
+        self.lbl_grid_hint = QLabel(self._t["grid_hint"])
+        self.lbl_grid_hint.setObjectName("Hint")
+        self.lbl_grid_hint.setWordWrap(True)
+        column.addWidget(self.lbl_grid_hint)
+
         self.grid = QListView()
         self.grid.setObjectName("ImageGrid")
         self.grid.setViewMode(QListView.ViewMode.IconMode)
@@ -863,6 +888,13 @@ class ImageLibraryPage(PageScaffold):
         self.grid.setMinimumHeight(320)
         self.grid.setStyleSheet(
             "QListView#ImageGrid{background:transparent;border:none;outline:none;}"
+        )
+        file_actions.enable_file_drag(self.grid)
+        file_actions.attach_result_menu(
+            self.grid,
+            self._model,
+            field=ImageGridModel.DRAG_FIELD,
+            labels=lambda: self._t,
         )
 
         detail = self._build_detail_panel()
@@ -1026,6 +1058,7 @@ class ImageLibraryPage(PageScaffold):
         self.btn_browse.setText(t["browse_all"])
         self.btn_open.setText(t["detail_open"])
         self.btn_reveal.setText(t["detail_reveal"])
+        self.lbl_grid_hint.setText(t["grid_hint"])
         self.search_input.setPlaceholderText(t["search_placeholder"])
         self.lbl_attr_hint.setText(t["attr_hint"])
         for index, key in enumerate(("mode_text", "mode_keyword", "mode_image")):
@@ -1530,7 +1563,7 @@ class ImageLibraryPage(PageScaffold):
         self._open_path(str(self._current_hit.get("image_path") or ""))
 
     def _on_reveal_image(self) -> None:
-        _reveal_in_file_manager(str(self._current_hit.get("image_path") or ""))
+        file_actions.reveal_in_file_manager(str(self._current_hit.get("image_path") or ""))
 
     @staticmethod
     def _open_path(path: str) -> None:

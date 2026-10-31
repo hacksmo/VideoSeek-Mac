@@ -56,6 +56,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui.widgets.button_roles import set_button_role
+from ui import file_actions
 from ui.widgets.image_library_page import ImageGridDelegate, ImageGridModel, _draw_cover
 from ui.widgets.scaffold import PageScaffold, VSCard
 
@@ -99,6 +100,11 @@ _STRINGS = {
         "status_vector_only": "图片是按向量近似的，没有文字匹配",
         "video_tip": "双击：在搜索页播放这一段",
         "image_tip": "双击：用系统看图打开",
+        "drag_hint": "把图片直接拖到剪映等应用即可导入；右键：在访达中显示 / 复制路径。",
+        "menu_reveal": "在访达中显示",
+        "menu_copy_path": "复制文件路径",
+        "menu_open": "用默认应用打开",
+        "menu_missing": "原文件当前不可达（硬盘没挂载？）",
         "scope_hint": "「全部」两侧都查；只查一侧时会跳过另一侧的索引，快一些。",
     },
     "en": {
@@ -130,6 +136,11 @@ _STRINGS = {
         "status_vector_only": "photos are vector approximations, no literal match",
         "video_tip": "Double-click to play this moment",
         "image_tip": "Double-click to open with the system viewer",
+        "drag_hint": "Drag a photo straight into another app to import it; right-click to reveal or copy its path.",
+        "menu_reveal": "Reveal in Finder",
+        "menu_copy_path": "Copy file path",
+        "menu_open": "Open with default app",
+        "menu_missing": "The source file is unreachable right now (external drive unmounted?)",
         "scope_hint": "Everything searches both sides; a single side skips the other index and is faster.",
     },
 }
@@ -144,6 +155,10 @@ def _format_elapsed(ms: int) -> str:
 
 class VideoHitModel(QAbstractListModel):
     """Holds video hits and the decoded frame thumbnails."""
+
+    # Dragging a video hit hands over the source file; there is no way to drag a
+    # time range, so playing from here stays the precise action.
+    DRAG_FIELD = "video_path"
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -161,9 +176,26 @@ class VideoHitModel(QAbstractListModel):
             return hit
         if role == THUMB_ROLE:
             return self._thumbs.get(index.row())
+        if role == Qt.ItemDataRole.DecorationRole:
+            return self._thumbs.get(index.row())
         if role == Qt.ItemDataRole.ToolTipRole:
             return f"{hit.get('file_name', '')}\n{hit.get('start_timecode', '')}"
         return None
+
+    def mimeData(self, indexes):  # noqa: N802 - Qt API
+        from ui.file_actions import file_mime_data
+
+        paths = []
+        for index in indexes or ():
+            if index.isValid() and 0 <= index.row() < len(self._hits):
+                paths.append(self._hits[index.row()].get(self.DRAG_FIELD) or "")
+        return file_mime_data(paths)
+
+    def mimeTypes(self) -> list[str]:  # noqa: N802 - Qt API
+        return ["text/uri-list", "text/plain"]
+
+    def supportedDragActions(self) -> Qt.DropAction:  # noqa: N802 - Qt API
+        return Qt.DropAction.CopyAction
 
     def set_hits(self, hits) -> None:
         self.beginResetModel()
@@ -472,6 +504,13 @@ class UnifiedSearchPage(PageScaffold):
         self.lbl_status.setWordWrap(True)
         column.addWidget(self.lbl_status)
 
+        # Persistent hint: nothing else ever writes here, so it survives a
+        # results update and a language switch (apply_texts refreshes it).
+        self.lbl_drag_hint = QLabel(self._t["drag_hint"])
+        self.lbl_drag_hint.setObjectName("Hint")
+        self.lbl_drag_hint.setWordWrap(True)
+        column.addWidget(self.lbl_drag_hint)
+
         self.search_input.returnPressed.connect(self.start_search)
         self.btn_search.clicked.connect(self.start_search)
         self.content_layout.addWidget(card)
@@ -503,6 +542,13 @@ class UnifiedSearchPage(PageScaffold):
             "QListView#UnifiedVideoStrip{background:transparent;border:none;outline:none;}"
         )
         self.video_grid.doubleClicked.connect(self._on_video_activated)
+        file_actions.enable_file_drag(self.video_grid)
+        file_actions.attach_result_menu(
+            self.video_grid,
+            self._video_model,
+            field=VideoHitModel.DRAG_FIELD,
+            labels=lambda: self._t,
+        )
 
         self.video_hint = QLabel(self._t["video_idle"])
         self.video_hint.setObjectName("Hint")
@@ -540,6 +586,13 @@ class UnifiedSearchPage(PageScaffold):
             "QListView#ImageGrid{background:transparent;border:none;outline:none;}"
         )
         self.image_grid.doubleClicked.connect(self._on_image_activated)
+        file_actions.enable_file_drag(self.image_grid)
+        file_actions.attach_result_menu(
+            self.image_grid,
+            self._image_model,
+            field=ImageGridModel.DRAG_FIELD,
+            labels=lambda: self._t,
+        )
 
         self.image_hint = QLabel(self._t["image_idle"])
         self.image_hint.setObjectName("Hint")
@@ -774,6 +827,7 @@ class UnifiedSearchPage(PageScaffold):
         self.lbl_card_title.setText(self._t["card"])
         self.search_input.setPlaceholderText(self._t["placeholder"])
         self.btn_search.setText(self._t["search"])
+        self.lbl_drag_hint.setText(self._t["drag_hint"])
         self.scope_combo.setToolTip(self._t["scope_hint"])
         for index, key in enumerate(("scope_all", "scope_video", "scope_image")):
             self.scope_combo.setItemText(index, self._t[key])
