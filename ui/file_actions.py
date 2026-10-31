@@ -188,11 +188,16 @@ def enable_file_drag(view) -> None:
     view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
 
 
-def attach_result_menu(view, model, *, field: str, labels) -> None:
+def attach_result_menu(view, model, *, field: str, labels, extra_actions=None) -> None:
     """Wire the right-click menu that reveals / copies / opens the source file.
 
     ``labels`` is a callable returning the current language table, because the
     menu is rebuilt on every click and must follow a language switch.
+
+    ``extra_actions`` is an optional ``callable(menu, paths, resolved)`` invoked
+    after the standard entries so a caller (e.g. the image library) can append
+    its own actions such as "delete". ``paths`` are the raw field values,
+    ``resolved`` are the ones that still exist on disk.
 
     A right-click on a row that is not part of the selection adopts just that
     row -- standard behaviour, and it keeps "right-click the one I meant" working
@@ -216,6 +221,11 @@ def attach_result_menu(view, model, *, field: str, labels) -> None:
             str((model.hit_at(row) or {}).get(field) or "") for row in sorted(rows)
         ]
         menu, _ = build_file_menu(view, paths, labels=labels())
+        if extra_actions is not None:
+            try:
+                extra_actions(menu, paths, existing_paths(paths))
+            except Exception:  # pragma: no cover - defensive
+                pass
         menu.exec(view.viewport().mapToGlobal(pos))
 
     from PySide6.QtCore import Qt

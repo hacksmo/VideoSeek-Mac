@@ -1088,3 +1088,161 @@ def get_image_library_status(*, config=None) -> dict:
         "vlm_reason": vlm_reason,
         "error": error,
     }
+
+
+# ---------------------------------------------------------------------------
+# Delete / launch
+# ---------------------------------------------------------------------------
+
+
+def delete_image(image_id: str, *, delete_file: bool = False, config=None) -> dict:
+    """Remove one image from the index, optionally moving its source file to trash.
+
+    ``delete_file=False`` only drops the index row (the file stays untouched);
+    ``delete_file=True`` also moves the source file to the OS trash bin. Returns
+    ``{"removed": int, "trashed": bool, "error": str}``.
+    """
+    from src.storage import image_lance_store as store
+
+    image_id = str(image_id or "").strip()
+    if not image_id:
+        return {"removed": 0, "trashed": False, "error": "image_id is required"}
+
+    path = ""
+    try:
+        row = store.get_image_row(image_id, config=config, columns=["image_path"])
+        path = str((row or {}).get("image_path") or "").strip()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Failed to resolve image path for %s: %s", image_id, exc)
+
+    trashed = False
+    error = ""
+    if delete_file:
+        if path and os.path.isfile(path):
+            trashed, error = _trash_file(path)
+        elif not path:
+            error = "源文件路径未知，仅移除索引记录"
+
+    removed = int(store.delete_images([image_id], config=config) or 0)
+    return {"removed": removed, "trashed": trashed, "error": error}
+
+
+def _trash_file(path: str) -> tuple[bool, str]:
+    """Move a file to the OS trash bin; never ``os.remove``.
+
+    Returns ``(ok, error)``. Falls back to a no-op with an error message when no
+    trash mechanism is available, rather than permanently deleting the file.
+    """
+    import shutil
+    import subprocess
+    import sys
+
+    path = os.path.normpath(str(path or ""))
+    if not path or not os.path.isfile(path):
+        return False, "文件不存在"
+
+    platform = sys.platform
+    if platform == "darwin":
+        # AppleScript "move to trash" is the safest, no third-party dependency.
+        script = (
+            'tell application "Finder" to delete POSIX file "'
+            + path.replace('"', '\\"')
+            + '"'
+        )
+        try:
+            subprocess.run(
+                ["osascript", "-e", script],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=20,
+            )
+            return (not os.path.exists(path)), ""
+        except Exception as exc:  # pragma: no cover - defensive
+            return False, f"移到废纸篓失败：{exc}"
+    if platform.startswith("win"):
+        try:
+            import send2trash  # type: ignore
+
+            send2trash.send2trash(path)
+            return (not os.path.exists(path)), ""
+        except Exception as exc:  # pragma: no cover - defensive
+            return False, f"移到回收站失败：{exc}"
+    # Linux / other: send2trash if present, else refuse.
+    try:
+        import send2trash  # type: ignore
+
+        send2trash.send2trash(path)
+        return (not os.path.exists(path)), ""
+    except Exception as exc:  # pragma: no cover - defensive
+        return False, f"未找到废纸篓工具，未删除源文件：{exc}"
+
+
+def launch_vlm_service(*, config=None) -> dict:
+    """Launch the local VLM service (LM Studio / Ollama) matching the preset.
+
+    The VLM is an external program; this only starts it (via ``open`` on macOS or
+    a best-effort CLI elsewhere) and returns ``{"launched": bool, "message": str}``.
+    Cloud presets are never launched — they are already running remotely.
+    """
+    import subprocess
+    import sys
+
+    from src.services.understanding_resource_service import (
+        REMOTE_VLM_MODE_LOCAL,
+        get_remote_vlm_settings,
+        normalize_remote_vlm_provider_mode,
+    )
+
+    settings = get_remote_vlm_settings(config)
+    mode = normalize_remote_vlm_provider_mode(settings.get("provider_mode"))
+    preset = str(settings.get("provider_preset") or "").strip().lower()
+    if mode != REMOTE_VLM_MODE_LOCAL:
+        return {
+            "launched": False,
+            "message": "当前是云端模型，无需启动本地服务",
+        }
+
+    base_url = str(settings.get("base_url") or "").strip()
+    commands: list[list[str]] = []
+    if preset == "ollama":
+        commands = [["ollama", "serve"], ["open", "-a", "Ollama"]]
+    elif preset == "lm_studio":
+        commands = [["open", "-a", "LM Studio"], ["lms", "server", "start"]]
+    else:  # custom local endpoint — nothing to launch generically
+        return {
+            "launched": False,
+            "message": f"已配置自定义本地服务 {base_url}，请手动启动该服务",
+        }
+
+    if sys.platform != "darwin":
+        # On non-macOS, only the CLI form makes sense; drop the `open -a` forms.
+        commands = [cmd for cmd in commands if cmd and cmd[0] not in {"open"}]
+
+    last_error = ""
+    for cmd in commands:
+        if not cmd:
+            continue
+        try:
+            subprocess.run(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=15,
+            )
+            last_error = ""
+            break
+        except Exception as exc:  # pragma: no cover - defensive
+            last_error = str(exc)
+
+    if last_error:
+        return {
+            "launched": False,
+            "message": f"启动失败：{last_error}",
+        }
+    name = "Ollama" if preset == "ollama" else "LM Studio"
+    return {
+        "launched": True,
+        "message": f"已尝试启动 {name}，请稍候片刻后刷新状态",
+    }

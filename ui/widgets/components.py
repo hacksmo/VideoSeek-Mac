@@ -338,6 +338,10 @@ class NavigationSidebar(QWidget):
         set_button_role(self.btn_about, "GhostButton", chrome="sidebarFooter")
         self.btn_language = QPushButton("EN")
         set_button_role(self.btn_language, "GhostButton", chrome="sidebarFooterGhost")
+        # 公告 / 关于 / 捐赠 这些低频按钮会挤占侧边栏空间，直接隐藏（对象保留，
+        # 避免 gui.py 里对它们的引用报错）。
+        self.btn_notice.hide()
+        self.btn_about.hide()
 
         self.footer_icon_row = QWidget()
         footer_icon_layout = QHBoxLayout(self.footer_icon_row)
@@ -357,6 +361,8 @@ class NavigationSidebar(QWidget):
         self.btn_donate.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         _apply_sidebar_footer_icon_size(self.btn_donate)
         _apply_sidebar_icon_font(self.btn_donate)
+        # 捐赠按钮也一并隐藏，把侧边栏空间留给核心导航。
+        self.btn_donate.hide()
 
         self.btn_github = _make_sidebar_icon_button()
         self.btn_bilibili = _make_sidebar_icon_button()

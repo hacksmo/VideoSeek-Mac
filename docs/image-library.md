@@ -59,6 +59,17 @@
 - 把**文件夹**拖进页面 = 添加目录；把**一张图片**拖进页面 = 以图搜图
 - 双击缩略图用系统看图应用打开；详情区也有「打开图片」「在访达中显示」
 - 「人数」筛选在语义和关键词模式下都会生效（语义结果按 `people_count` 后置过滤）
+- **删除**：详情区有「删除并移入废纸篓」按钮；右键缩略图菜单里有「从索引移除」和「删除并移入废纸篓」。删文件走系统废纸篓（macOS 用 Finder `delete`，可找回），绝不直接 `rm` 源文件
+- **启动服务**：VLM（视觉描述）服务未启动且是本地预设（LM Studio / Ollama）时，状态区会显示「启动服务」按钮，点击自动拉起对应程序（Ollama → `ollama serve`，LM Studio → `open -a "LM Studio"`），1.5s 后自动重新探测。云端预设不显示该按钮
+
+### 界面空间精简（2026-10 起）
+
+为给缩略图网格留出更多纵向空间，以下说明性元素默认隐藏（信息仍可在 tooltip / 右键菜单获得）：
+
+- 顶部副标题（页面说明文字）
+- 检索区的属性词提示行、网格操作提示行
+
+侧边栏的「公告 / 关于 / 捐赠」低频按钮也已隐藏（对象仍保留，主窗口仍引用它们，只是不显示）。
 
 ### 缩略图为什么要单独缓存
 
@@ -452,10 +463,11 @@ VLM 只在**建索引时**用一次，搜索路径完全不碰它：
 | `src/media/formats.py` | `IMAGE_EXTS` / `is_supported_image_path`（与 `VIDEO_EXTS` 严格分离） |
 | `src/storage/image_lance_store.py` | `image_assets` 表：schema、upsert、向量检索、全表扫描、统计、删除 |
 | `src/services/image_understanding.py` | 描述 prompt、JSON 解析与容错、VLM 调用、可达性探测 |
-| `src/services/image_index_service.py` | 扫描、增量索引、CLIP 编码、三级检索分流、向量矩阵缓存、状态 |
+| `src/services/image_index_service.py` | 扫描、增量索引、CLIP 编码、三级检索分流、向量矩阵缓存、状态、`delete_image` / `launch_vlm_service` |
 | `src/services/image_attributes.py` | 属性提示词面板、中文属性词表、否定处理、零样本打分与降权 |
 | `scripts/image_index.py` | 命令行入口 |
-| `ui/widgets/image_library_page.py` | 图片库页签：目录管理、索引进度、虚拟化网格、详情、拖拽 |
+| `ui/widgets/image_library_page.py` | 图片库页签：目录管理、索引进度、虚拟化网格、详情、拖拽、删除、启动服务按钮 |
+| `ui/file_actions.py` | OS 级文件动作（reveal / copy / open / 拖拽 / 右键菜单）；`attach_result_menu` 支持 `extra_actions` 回调 |
 | `ui/image_thumbs.py` | 缩略图磁盘缓存 + 异步加载（网格 256 / 详情 1024） |
 | `tests/test_image_library.py` | 41 个用例：格式、解析、扫描、内容 ID、Lance 读写、关键词与人数过滤、中文分词与查询路由 |
 | `tests/test_image_attributes.py` | 28 个用例：属性词解析、否定、多组相乘、人物降权、属性优先于字面扫描、矩阵缓存 |

@@ -145,6 +145,17 @@ _STRINGS = {
         "menu_copy_path": "复制文件路径",
         "menu_open": "用默认应用打开",
         "menu_missing": "原文件当前不可达（硬盘没挂载？）",
+        "menu_delete_index": "从索引移除",
+        "menu_delete_file": "删除并移入废纸篓",
+        "delete_index_done": "已从索引移除 {count} 张",
+        "delete_file_confirm_title": "删除图片",
+        "delete_file_confirm_body": "将把 {count} 张图片移入废纸篓，并从索引移除。\n\n此操作可撤销（从废纸篓找回），确定继续吗？",
+        "delete_file_done": "已删除 {count} 张（已移入废纸篓）",
+        "delete_failed": "删除失败：{error}",
+        "start_service": "启动服务",
+        "service_launching": "正在启动服务…",
+        "service_launched": "服务已启动：{message}",
+        "service_failed": "启动失败：{message}",
     },
     "en": {
         "title": "Photo Library",
@@ -212,6 +223,17 @@ _STRINGS = {
         "menu_copy_path": "Copy file path",
         "menu_open": "Open with default app",
         "menu_missing": "The source file is unreachable right now (external drive unmounted?)",
+        "menu_delete_index": "Remove from index",
+        "menu_delete_file": "Delete & move to Trash",
+        "delete_index_done": "Removed {count} from the index",
+        "delete_file_confirm_title": "Delete images",
+        "delete_file_confirm_body": "Move {count} image(s) to the Trash and remove them from the index.\n\nYou can restore them from the Trash. Continue?",
+        "delete_file_done": "Deleted {count} (moved to Trash)",
+        "delete_failed": "Delete failed: {error}",
+        "start_service": "Start service",
+        "service_launching": "Starting service…",
+        "service_launched": "Service started: {message}",
+        "service_failed": "Failed to start: {message}",
     },
 }
 
@@ -374,6 +396,45 @@ class _StatusWorker(QThread):
             from src.services import image_index_service as service
 
             self.ready.emit(service.get_image_library_status())
+        except Exception as exc:  # pragma: no cover - defensive
+            self.failed.emit(str(exc))
+
+
+class _DeleteWorker(QThread):
+    done = Signal(dict)
+    failed = Signal(str)
+
+    def __init__(self, image_ids: list[str], *, delete_file: bool, parent=None):
+        super().__init__(parent)
+        self._image_ids = list(image_ids or [])
+        self._delete_file = bool(delete_file)
+
+    def run(self):
+        try:
+            from src.services import image_index_service as service
+
+            removed = 0
+            trashed = False
+            error = ""
+            for image_id in self._image_ids:
+                result = service.delete_image(image_id, delete_file=self._delete_file)
+                removed += int(result.get("removed") or 0)
+                trashed = trashed or bool(result.get("trashed"))
+                error = str(result.get("error") or "") or error
+            self.done.emit({"removed": removed, "trashed": trashed, "error": error})
+        except Exception as exc:  # pragma: no cover - defensive
+            self.failed.emit(str(exc))
+
+
+class _LaunchWorker(QThread):
+    done = Signal(dict)
+    failed = Signal(str)
+
+    def run(self):
+        try:
+            from src.services import image_index_service as service
+
+            self.done.emit(service.launch_vlm_service())
         except Exception as exc:  # pragma: no cover - defensive
             self.failed.emit(str(exc))
 
@@ -719,6 +780,8 @@ class ImageLibraryPage(PageScaffold):
         self._index_worker = None
         self._search_worker = None
         self._status_worker = None
+        self._delete_worker = None
+        self._launch_worker = None
         self._scan_files: list[str] = []
         self._last_query = ""
         self._index_after_scan = False
@@ -737,7 +800,8 @@ class ImageLibraryPage(PageScaffold):
         self.setAcceptDrops(True)
         self.header.title.setText(self._t["title"])
         self.header.subtitle.setText(self._t["subtitle"])
-        self.header.subtitle.show()
+        # 顶部说明文字不占空间：隐藏 subtitle，把空间留给缩略图网格。
+        self.header.subtitle.hide()
 
         self._build_library_card()
         self._build_search_card()
@@ -818,6 +882,17 @@ class ImageLibraryPage(PageScaffold):
         self.lbl_status.setWordWrap(True)
         column.addWidget(self.lbl_status)
 
+        # 启动本地 VLM 服务按钮：仅当服务未就绪且是本地预设时显示。
+        status_row = QHBoxLayout()
+        status_row.setSpacing(8)
+        self.btn_start_service = QPushButton(self._t["start_service"])
+        set_button_role(self.btn_start_service, "AccentGhostButton")
+        self.btn_start_service.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_start_service.hide()
+        status_row.addWidget(self.btn_start_service)
+        status_row.addStretch(1)
+        column.addLayout(status_row)
+
         self.content_layout.addWidget(card)
 
     def _build_search_card(self) -> None:
@@ -874,6 +949,8 @@ class ImageLibraryPage(PageScaffold):
         self.lbl_attr_hint = QLabel(self._t["attr_hint"])
         self.lbl_attr_hint.setObjectName("Hint")
         self.lbl_attr_hint.setWordWrap(True)
+        # 属性词提示属于一次性使用说明，常驻会挤占缩略图空间，改放 tooltip。
+        self.lbl_attr_hint.hide()
         column.addWidget(self.lbl_attr_hint)
 
         self.lbl_model_hint = QLabel("")
@@ -888,10 +965,12 @@ class ImageLibraryPage(PageScaffold):
         column.addWidget(self.lbl_search_status)
 
         # Persistent, unlike the status line above: this one says what you can do
-        # with a hit, and nothing else ever overwrites it.
+        # with a hit, and nothing else ever overwrites it. 说明性文字，隐藏以腾出
+        # 缩略图空间（右键菜单与拖拽已覆盖这些操作）。
         self.lbl_grid_hint = QLabel(self._t["grid_hint"])
         self.lbl_grid_hint.setObjectName("Hint")
         self.lbl_grid_hint.setWordWrap(True)
+        self.lbl_grid_hint.hide()
         column.addWidget(self.lbl_grid_hint)
 
         self.grid = QListView()
@@ -918,6 +997,7 @@ class ImageLibraryPage(PageScaffold):
             self._model,
             field=ImageGridModel.DRAG_FIELD,
             labels=lambda: self._t,
+            extra_actions=self._build_delete_menu_actions,
         )
 
         detail = self._build_detail_panel()
@@ -978,7 +1058,9 @@ class ImageLibraryPage(PageScaffold):
         set_button_role(self.btn_open, "PrimaryButton")
         self.btn_reveal = QPushButton(self._t["detail_reveal"])
         set_button_role(self.btn_reveal, "GhostButton")
-        for button in (self.btn_open, self.btn_reveal):
+        self.btn_delete = QPushButton(self._t["menu_delete_file"])
+        set_button_role(self.btn_delete, "DangerGhostButton")
+        for button in (self.btn_open, self.btn_reveal, self.btn_delete):
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setEnabled(False)
             row.addWidget(button)
@@ -1002,6 +1084,8 @@ class ImageLibraryPage(PageScaffold):
         self.grid.doubleClicked.connect(self._on_grid_activated)
         self.btn_open.clicked.connect(self._on_open_image)
         self.btn_reveal.clicked.connect(self._on_reveal_image)
+        self.btn_delete.clicked.connect(self._on_delete_image)
+        self.btn_start_service.clicked.connect(self._on_start_service)
         self.roots_list.currentRowChanged.connect(self._on_root_selected)
         self._on_mode_changed()
 
@@ -1081,6 +1165,8 @@ class ImageLibraryPage(PageScaffold):
         self.btn_browse.setText(t["browse_all"])
         self.btn_open.setText(t["detail_open"])
         self.btn_reveal.setText(t["detail_reveal"])
+        self.btn_delete.setText(t["menu_delete_file"])
+        self.btn_start_service.setText(t["start_service"])
         self.lbl_grid_hint.setText(t["grid_hint"])
         self.search_input.setPlaceholderText(t["search_placeholder"])
         self.lbl_attr_hint.setText(t["attr_hint"])
@@ -1229,6 +1315,23 @@ class ImageLibraryPage(PageScaffold):
         if not status.get("vlm_ready"):
             self.chk_describe.setChecked(False)
         self.chk_describe.setToolTip(str(status.get("vlm_reason") or ""))
+        self._render_start_service_button(bool(status.get("vlm_ready")))
+
+    def _render_start_service_button(self, vlm_ready: bool) -> None:
+        """Show the "start service" button only for a not-running local preset."""
+        from src.services.understanding_resource_service import (
+            REMOTE_VLM_MODE_LOCAL,
+            get_remote_vlm_settings,
+            normalize_remote_vlm_provider_mode,
+        )
+
+        try:
+            settings = get_remote_vlm_settings()
+            mode = normalize_remote_vlm_provider_mode(settings.get("provider_mode"))
+            is_local = mode == REMOTE_VLM_MODE_LOCAL
+        except Exception:
+            is_local = False
+        self.btn_start_service.setVisible(not vlm_ready and is_local)
 
     # -- scanning / indexing -------------------------------------------
     def _start_scan(self, root: str = "") -> None:
@@ -1527,6 +1630,7 @@ class ImageLibraryPage(PageScaffold):
         path = str(hit.get("image_path") or "")
         self.btn_open.setEnabled(bool(path))
         self.btn_reveal.setEnabled(bool(path))
+        self.btn_delete.setEnabled(bool(str(hit.get("image_id") or "")))
 
         caption = str(hit.get("caption") or "").strip()
         self.detail_caption.setText(caption or self._t["detail_no_caption"])
@@ -1581,6 +1685,7 @@ class ImageLibraryPage(PageScaffold):
         self.detail_path.setText("")
         self.btn_open.setEnabled(False)
         self.btn_reveal.setEnabled(False)
+        self.btn_delete.setEnabled(False)
 
     def _on_grid_activated(self, index: QModelIndex) -> None:
         hit = index.data(HIT_ROLE) or {}
@@ -1591,6 +1696,105 @@ class ImageLibraryPage(PageScaffold):
 
     def _on_reveal_image(self) -> None:
         file_actions.reveal_in_file_manager(str(self._current_hit.get("image_path") or ""))
+
+    def _build_delete_menu_actions(self, menu, _paths, _resolved) -> None:
+        """Append "remove from index" / "delete to trash" to the right-click menu."""
+        from PySide6.QtGui import QAction
+
+        image_ids = self._selected_image_ids()
+        if not image_ids:
+            return
+        menu.addSeparator()
+        action_index = QAction(self._t["menu_delete_index"], menu)
+        action_index.triggered.connect(lambda: self._delete_image_ids(image_ids, delete_file=False))
+        menu.addAction(action_index)
+        action_file = QAction(self._t["menu_delete_file"], menu)
+        action_file.triggered.connect(lambda: self._confirm_delete_files(image_ids))
+        menu.addAction(action_file)
+
+    def _selected_image_ids(self) -> list[str]:
+        selection = self.grid.selectionModel()
+        ids: list[str] = []
+        if selection is None:
+            return ids
+        for index in selection.selectedIndexes():
+            image_id = str((index.data(HIT_ROLE) or {}).get("image_id") or "").strip()
+            if image_id and image_id not in ids:
+                ids.append(image_id)
+        return ids
+
+    def _confirm_delete_files(self, image_ids: list[str]) -> None:
+        if not image_ids:
+            return
+        answer = QMessageBox.question(
+            self,
+            self._t["delete_file_confirm_title"],
+            self._t["delete_file_confirm_body"].format(count=len(image_ids)),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self._delete_image_ids(image_ids, delete_file=True)
+
+    def _on_delete_image(self) -> None:
+        image_id = str(self._current_hit.get("image_id") or "").strip()
+        if not image_id:
+            return
+        self._confirm_delete_files([image_id])
+
+    def _delete_image_ids(self, image_ids: list[str], *, delete_file: bool) -> None:
+        """Delete index rows (and optionally trash files) off the UI thread."""
+        from src.services import image_index_service as service
+
+        worker = _DeleteWorker(image_ids, delete_file=delete_file, parent=self)
+        worker.done.connect(self._on_delete_finished)
+        worker.failed.connect(self._on_delete_failed)
+        self._delete_worker = worker
+        worker.start()
+
+    def _on_delete_finished(self, result: dict) -> None:
+        result = result or {}
+        count = int(result.get("removed") or 0)
+        trashed = bool(result.get("trashed"))
+        if trashed:
+            self._note = self._t["delete_file_done"].format(count=count)
+        else:
+            self._note = self._t["delete_index_done"].format(count=count)
+        self._current_hit = {}
+        self._clear_detail()
+        self.refresh_status()
+        # Re-run the current view so the removed image disappears from the grid.
+        self._run_search("browse", "")
+
+    def _on_delete_failed(self, message: str) -> None:
+        self.lbl_status.setText(self._t["delete_failed"].format(error=message))
+
+    def _on_start_service(self) -> None:
+        self.btn_start_service.setEnabled(False)
+        self.btn_start_service.setText(self._t["service_launching"])
+        worker = _LaunchWorker(parent=self)
+        worker.done.connect(self._on_service_launched)
+        worker.failed.connect(self._on_service_launch_failed)
+        self._launch_worker = worker
+        worker.start()
+
+    def _on_service_launched(self, result: dict) -> None:
+        self.btn_start_service.setEnabled(True)
+        self.btn_start_service.setText(self._t["start_service"])
+        result = result or {}
+        message = str(result.get("message") or "")
+        if result.get("launched"):
+            self._note = self._t["service_launched"].format(message=message)
+            # Give the external service a moment to bind its port, then re-probe.
+            QTimer.singleShot(1500, self.refresh_status)
+        else:
+            self.lbl_status.setText(self._t["service_failed"].format(message=message))
+        self.refresh_status()
+
+    def _on_service_launch_failed(self, message: str) -> None:
+        self.btn_start_service.setEnabled(True)
+        self.btn_start_service.setText(self._t["start_service"])
+        self.lbl_status.setText(self._t["service_failed"].format(message=message))
 
     @staticmethod
     def _open_path(path: str) -> None:
@@ -1675,6 +1879,8 @@ class ImageLibraryPage(PageScaffold):
             "_prune_worker",
             "_search_worker",
             "_status_worker",
+            "_delete_worker",
+            "_launch_worker",
         ):
             worker = getattr(self, name, None)
             if worker is None:
