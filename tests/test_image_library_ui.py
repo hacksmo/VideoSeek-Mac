@@ -119,6 +119,15 @@ class ImageGridModelTests(unittest.TestCase):
         self.assertEqual(self.model.hit_at(1)["image_id"], "b" * 32)
         self.assertEqual(self.model.hit_at(99), {})
 
+    def test_flags_mark_items_draggable(self):
+        from PySide6.QtCore import Qt
+
+        flags = self.model.flags(self.model.index(0))
+        self.assertTrue(flags & Qt.ItemFlag.ItemIsDragEnabled)
+        self.assertTrue(flags & Qt.ItemFlag.ItemIsSelectable)
+        # An invalid index has no flags at all.
+        self.assertEqual(self.model.flags(self.model.index(99)), Qt.ItemFlag.NoItemFlags)
+
     def test_display_role_prefers_caption_then_path(self):
         from PySide6.QtCore import Qt
 

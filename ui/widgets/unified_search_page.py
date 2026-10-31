@@ -168,6 +168,17 @@ class VideoHitModel(QAbstractListModel):
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
         return 0 if parent.isValid() else len(self._hits)
 
+    def flags(self, index: QModelIndex):  # noqa: N802 - Qt API
+        if not index.isValid():
+            return Qt.ItemFlag.NoItemFlags
+        # ItemIsDragEnabled lets the view start a drag instead of rubber-band
+        # selection; without it setDragEnabled(True) is inert.
+        return (
+            Qt.ItemFlag.ItemIsEnabled
+            | Qt.ItemFlag.ItemIsSelectable
+            | Qt.ItemFlag.ItemIsDragEnabled
+        )
+
     def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
         if not index.isValid() or not (0 <= index.row() < len(self._hits)):
             return None
