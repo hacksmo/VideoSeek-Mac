@@ -266,6 +266,9 @@ class VideoHitDelegate(QStyledItemDelegate):
 
         thumb_rect = QRect(rect.left(), rect.top(), rect.width(), VIDEO_THUMB_HEIGHT)
         thumb_clip = QPainterPath()
+        # Union the bottom patch with the rounded rect (OddEvenFill, the
+        # default, would punch a dark hole across the thumbnail's bottom edge).
+        thumb_clip.setFillRule(Qt.FillRule.WindingFill)
         thumb_clip.addRoundedRect(thumb_rect.toRectF(), radius, radius)
         thumb_clip.addRect(
             QRect(

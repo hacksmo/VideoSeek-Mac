@@ -527,6 +527,12 @@ class ImageGridDelegate(QStyledItemDelegate):
             rect.left(), rect.top(), rect.width(), max(24, rect.height() - caption_height)
         )
         thumb_clip = QPainterPath()
+        # The bottom patch must union with the rounded rect. QPainterPath
+        # defaults to OddEvenFill, which would punch a hole where the two
+        # sub-paths overlap and leave a dark strip across the thumbnail's
+        # bottom edge (the card background showing through). WindingFill makes
+        # the union cover the full thumbnail instead.
+        thumb_clip.setFillRule(Qt.FillRule.WindingFill)
         thumb_clip.addRoundedRect(thumb_rect.toRectF(), radius, radius)
         # Square off the bottom of the thumbnail so it meets the caption cleanly.
         thumb_clip.addRect(
