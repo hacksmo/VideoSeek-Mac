@@ -361,6 +361,11 @@ class MainWindow(
         self.unified_page.video_activated.connect(self._on_unified_video_activated)
         main_layout.addWidget(self.content, 1)
 
+        # 图片库的「照片目录」控制面板挂到左侧全局侧边栏，页面右侧全给检索+图片。
+        if hasattr(self.images_page, "library_card"):
+            self.sidebar.attach_library_panel(self.images_page.library_card)
+            self.sidebar.set_library_panel_visible(False)
+
         self.search_page.preview_placeholder.setMinimumHeight(0)
         self.search_page.preview_placeholder.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
@@ -1064,6 +1069,8 @@ class MainWindow(
             self._settle_understanding_page_layout()
         if page_name == "link":
             self._settle_link_page_layout()
+        # 图片库的「照片目录」面板只在图片库页面显示。
+        self.sidebar.set_library_panel_visible(page_name == "images")
         for feature in get_registry().features:
             feature.on_page_shown(self, page_name)
 

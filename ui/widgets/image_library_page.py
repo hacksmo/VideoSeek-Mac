@@ -803,23 +803,16 @@ class ImageLibraryPage(PageScaffold):
         # 顶部说明文字不占空间：隐藏 subtitle，把空间留给缩略图网格。
         self.header.subtitle.hide()
 
-        library_card = self._build_library_card()
-        search_card = self._build_search_card()
+        # 「照片目录」控制面板：构建后交给主窗口挂到左侧全局侧边栏（见
+        # gui.py 的 sidebar.attach_library_panel）。页面自身只保留检索 + 图片网格，
+        # 右侧全部让给检索后的图片。
+        self.library_card = self._build_library_card()
+        self.library_card.setMinimumWidth(0)
+        self.library_card.setMaximumWidth(16777215)
+        self.library_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
 
-        # 布局：左侧窄栏放「照片目录」控制（添加/索引/启动服务等），右侧全部
-        # 让给检索控件 + 缩略图网格 + 详情。用水平 splitter 便于拖动调宽。
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setObjectName("ImageLibraryMainSplitter")
-        splitter.setChildrenCollapsible(False)
-        splitter.addWidget(library_card)
-        splitter.addWidget(search_card)
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        splitter.setSizes([300, 900])
-        library_card.setMinimumWidth(260)
-        library_card.setMaximumWidth(420)
-        self._main_splitter = splitter
-        self.content_layout.addWidget(splitter, 1)
+        search_card = self._build_search_card()
+        self.content_layout.addWidget(search_card, 1)
 
         self._decorate()
 

@@ -291,6 +291,8 @@ class NavigationSidebar(QWidget):
         self.subtitle.setObjectName("BrandSubtitle")
         self.subtitle.setWordWrap(True)
         layout.addWidget(self.subtitle)
+        # 副标题 + hero 卡片会挤占侧边栏顶部空间，隐藏（对象保留，避免引用报错）。
+        self.subtitle.hide()
 
         self.hero_card = QFrame()
         self.hero_card.setObjectName("HeroCard")
@@ -309,6 +311,7 @@ class NavigationSidebar(QWidget):
         hero_layout.addWidget(self.hero_title)
         hero_layout.addWidget(self.hero_body)
         layout.addWidget(self.hero_card)
+        self.hero_card.hide()
 
         self._nav_buttons: dict[str, QPushButton] = {}
         self.btn_page_search = self._build_nav_button("Search", checked=True)
@@ -330,6 +333,17 @@ class NavigationSidebar(QWidget):
         self.runtime_hint.setWordWrap(True)
         self.runtime_hint.hide()
         layout.addWidget(self.runtime_hint)
+
+        # 图片库「照片目录」面板槽位：由主窗口在切到图片库页面时挂载/显示。
+        self.library_panel_host = QWidget()
+        self.library_panel_host.setObjectName("SidebarLibraryPanelHost")
+        self.library_panel_layout = QVBoxLayout(self.library_panel_host)
+        self.library_panel_layout.setContentsMargins(0, 0, 0, 0)
+        self.library_panel_layout.setSpacing(8)
+        self._library_panel = None
+        self.library_panel_host.hide()
+        layout.addWidget(self.library_panel_host)
+
         layout.addStretch()
 
         self.btn_notice = QPushButton("Notes")
@@ -402,6 +416,24 @@ class NavigationSidebar(QWidget):
         button.setCursor(Qt.PointingHandCursor)
         button.setFixedHeight(COMPONENT_SIZES["nav_button_height"])
         return button
+
+    def attach_library_panel(self, widget) -> None:
+        """Host the image library's「照片目录」panel inside the sidebar.
+
+        The panel widget is reparented into ``library_panel_host``; its signal
+        connections are unaffected. Call :meth:`set_library_panel_visible` to
+        show it only while the image-library page is active.
+        """
+        if widget is self._library_panel:
+            return
+        self._library_panel = widget
+        if widget is not None:
+            widget.setParent(self.library_panel_host)
+            self.library_panel_layout.addWidget(widget)
+
+    def set_library_panel_visible(self, visible: bool) -> None:
+        """Show/hide the hosted image-library panel (and the host row)."""
+        self.library_panel_host.setVisible(bool(visible) and self._library_panel is not None)
 
     def register_nav_page(self, page_id: str, label: str, *, insert_after: str = "understanding"):
         """Insert an optional nav button after ``insert_after`` (plugin pages)."""

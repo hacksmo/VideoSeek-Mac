@@ -19,6 +19,7 @@
 | 界面空间精简 | [已提交 85eb211](#已提交2026-10-31--commit-85eb211) | 隐藏 subtitle/提示行/侧边栏低频按钮 |
 | 删侧边栏按钮 | [已提交 23477f8](#已提交2026-10-31--commit-23477f8) | 隐藏语言/主题/GitHub/B站/QQ |
 | 图片库左栏布局 | [已提交 23477f8](#已提交2026-10-31--commit-23477f8) | 功能模块挪到左侧，右侧全给图片 |
+| 照片目录进侧边栏 | [已提交后续](#已提交2026-10-31--commit-后续) | 去 LOCAL AI hero，照片目录挂到全局侧边栏 |
 | 拖拽变成框选 | [2026-10-31](#2026-10-31) | 模型缺 `ItemIsDragEnabled` 标志 |
 | 自动增量索引 | [2026-10-31](#2026-10-31) | 打开软件自动检查新增图并索引+描述 |
 | git 推 GitHub 502 | [2026-10-30](#2026-10-30) | 代理被污染，per-url 代理 + 重试别名 |
@@ -74,6 +75,24 @@
 3. **文档导航明确「先读两个文档」**
    - 需求：切换模型时希望新 AI 能直接找到技术文档和所有更改，不读代码。
    - 改动：`docs/changelog.md` 顶部导航明确「先读 `docs/changelog.md` + `docs/image-library.md`」，架构再读 `architecture.md` / `engineering.md`。
+
+---
+
+## 已提交（2026-10-31 · commit 后续）
+
+**去掉 LOCAL AI hero 卡片 + 「照片目录」挪进全局侧边栏**：
+
+1. **隐藏侧边栏顶部 hero 卡片与副标题**
+   - 需求：左上角「LOCAL AI」hero 卡片占空间，去掉后侧边栏顶部腾空。
+   - 改动：`ui/widgets/components.py` 隐藏 `subtitle` 和 `hero_card`（对象保留，仅 `hide()`）。
+
+2. **「照片目录」整块移到全局侧边栏**
+   - 需求：把图片库的「照片目录」控制面板从页面内部挪到最左侧全局侧边栏，让侧边栏显示「导航项 + 照片目录」两项，图片库页面右侧全给检索 + 图片网格。
+   - 改动：
+     - `components.py`：`NavigationSidebar` 新增 `library_panel_host`（`SidebarLibraryPanelHost`）容器，位于导航项之后、`addStretch()` 之前；新增 `attach_library_panel(widget)`（reparent 到 host）与 `set_library_panel_visible(bool)`。
+     - `image_library_page.py`：`__init__` 不再用 splitter 把 `library_card` 放进页面，而是 `self.library_card = self._build_library_card()` 暴露给主窗口；页面 `content_layout` 只放 `search_card`（检索 + 网格 + 详情，占满）。`library_card` 去掉 260~420px 宽度限制，改为自适应侧边栏宽度。
+     - `gui.py`：构建 images_page 后 `self.sidebar.attach_library_panel(self.images_page.library_card)`；`switch_page` 里 `self.sidebar.set_library_panel_visible(page_name == "images")`。
+   - 关键点：卡片 reparent 到 sidebar 后，其按钮信号连接不受影响（信号在 widget 间，与 parent 无关）。
 
 ---
 
