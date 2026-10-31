@@ -8,176 +8,121 @@
 
 ---
 
-> ### ⚠️ Unofficial macOS fork
->
-> The original project **[6v17/VideoSeek](https://github.com/6v17/VideoSeek)** was created by
-> [@6v17](https://github.com/6v17). The design, algorithms, and all core implementation belong to
-> the upstream author. This fork only makes the app installable and runnable on macOS.
->
-> **Windows users: go to the upstream repository → <https://github.com/6v17/VideoSeek>**
-> Upstream ships the Windows installer, DirectML GPU acceleration, and official support.
-> None of that is offered or maintained here.
+**Local semantic search over video *and* photos**: find the shot or image you need with one sentence or one screenshot. Everything runs on your machine; media is never uploaded.
+
+<p align="center">
+  <img src="docs/assets/图片库-语义搜索.jpg" alt="Photo library semantic search: type '胖' and matching photos appear" width="800">
+</p>
+
+> Above: search "胖" (stocky) in the photo library and matching photos come up — no filenames, no manual tagging.
 
 ---
 
-Search a local video library by **text or screenshot**, with **hard-subtitle OCR**; preview hits and
-export MP4, Jianying, or NLE timelines. Indexing stays on your machine (ONNX · Lance · FFmpeg) and
-**media is not uploaded**.
+## At a glance: what this fork fixes
 
-<p align="center">
-  <img src="docs/assets/图片搜索.png" alt="Photo library semantic search UI" width="800">
-</p>
+### The original's shortcomings
 
-## Why this fork is worth using
+The original [6v17/VideoSeek](https://github.com/6v17/VideoSeek) is excellent, but it has real gaps:
 
-Three things make this fork genuinely useful for people who cut video:
+| Gap | Why it hurts |
+|-----|--------------|
+| ❌ **Video only** | Photos, screenshots and reference images can't be searched — yet half a video editor's material is images |
+| ❌ **Windows only** | macOS users can't install or run it |
+| ❌ **Chinese search barely works** | The default model is English-only; searching "红酒瓶" returns meme images |
+| ❌ **Full re-index** | Adding one image forces a full library rebuild |
+| ❌ **Fiddly setup** | Manual commands and environment setup every time |
 
-### 1. Search videos *and* photos from one box
+### What I changed
 
-The painful part of editing is finding the right clip. Upstream only searches video; this fork adds:
+This macOS fork closes those gaps one by one:
 
-- **Chinese photo search** — describe the picture in plain words and it finds it. Queries like
-  "woman in a red dress by the window", "light clothes", "stocky person", "flashy outfit" ask about
-  what's *in* the frame, not filenames, and still hit ([image library](docs/image-library.md)).
-- **Unified search** — one box searches both video moments and photos, grouped results
-  ([unified search](docs/unified-search.md)).
-- **Video search unchanged** — semantic video search, hard-subtitle OCR, screenshot search, and
-  MP4 / Jianying export all remain.
+- ✅ **Photo library** — semantic index for photos, screenshots and reference images, with auto-generated Chinese captions and structured people tags
+- ✅ **Chinese photo search** — describe what's *in* the frame (`woman in a red dress`, `stocky person`, `light clothes`), not the filename
+- ✅ **Unified search** — one box searches videos and photos together, grouped results
+- ✅ **Incremental indexing** — new material only indexes the new parts, no full rebuild
+- ✅ **Double-click app** — packaged as a macOS app with an icon; launch by double-clicking, no terminal
+- ✅ **Editor-friendly UI** — drag images straight into Jianying, right-click to delete (to Trash), one-click start the caption service
 
-### 2. Index once, search instantly, update incrementally
+### Why it's good
 
-- Material is **indexed once**; vectors live on disk (Lance), so later searches are millisecond-fast.
-- **Incremental indexing** — new material only indexes the newly added parts, no full rebuild.
+> The core pitch in one line: **make "finding material" so fast you forget it exists.**
 
-### 3. A double-click macOS app
+- 🔍 **Accurate**: semantic search + attribute filters (color / build / style) + a three-level Chinese router. On 1262 real photos: black 12/12, light clothes 10/12
+- ⚡ **Fast**: index once, millisecond searches after; incremental updates keep it snappy
+- 🔒 **Fully local**: ONNX + Lance + FFmpeg, all on-device — not a single image is uploaded
+- 🖱️ **Frictionless**: drag-to-import, right-click management, one-click service start — no learning curve for editors
 
-- Ships as a **VideoSeek.app** with an icon — drop it in `/Applications` or the Dock and
-  **double-click to launch**, no script every time.
-- Use [`packaging/build-app.command`](packaging/build-app.command) to rebuild, or bundle a
-  standalone package for people without the environment.
+---
 
-> Everything runs **locally** (ONNX · Lance · FFmpeg); media is **not uploaded**.
+## Quick start
 
-## What this fork changes
+### 1. Install dependencies (double-click)
 
-| Area | Upstream | This fork |
-|------|----------|-----------|
-| Target platform | Windows 10 / 11 | macOS 13+ (Apple Silicon primary, Intel untested) |
-| Install | Installer / from source | Double-click `install-macos.command` |
-| Launch | `VideoSeek.exe` | **double-click `VideoSeek.app`** (also `/Applications` / Dock; see [`packaging/`](packaging/)) |
-| Packaging | official installer | **lightweight `.app` launcher + icon**; `packaging/build-app.command` rebuilds, or bundle standalone |
-| Indexing | one-shot build | **incremental indexing** — only new material is indexed |
-| FFmpeg detection | ELF / PE magic only | **adds Mach-O** (without it macOS reports "no FFmpeg") |
-| Playback | bundled `vlc_lib/` DLLs | reuses `libvlc` inside `/Applications/VLC.app` |
-| Docs | Windows-first | rewritten for macOS |
+Double-click **`install-macos.command`** in Finder. The script picks a Python 3.11–3.13 interpreter, creates `~/.videoseek-venv`, and installs ~600 MB of dependencies from a China-friendly mirror. Expect 5–15 minutes on first run.
 
-No functional changes: indexing, search, export, Agent API and cloud embedding behave exactly as
-upstream. Exactly one code path was touched (FFmpeg binary detection) — see
-[`docs/macos-notes.md`](docs/macos-notes.md#the-only-code-change).
+> Prerequisites: Xcode command-line tools, Homebrew Python 3.13 and FFmpeg (install VLC for preview playback).
 
-## Three steps
+### 2. Import models
 
-### 0. Prerequisites
-
-```bash
-xcode-select --install        # command line tools (git)
-brew install python@3.13 ffmpeg
-brew install --cask vlc       # optional: without it preview playback is unavailable
-```
-
-> **Python must be 3.11 – 3.13.** 3.14 / 3.9 have no prebuilt wheels for `onnxruntime` or
-> `faiss-cpu` and fail with `No matching distribution found for onnxruntime`. The installer picks a
-> compliant interpreter automatically.
-
-### 1. Install dependencies
-
-Double-click **`install-macos.command`** in Finder. If Gatekeeper blocks it: right-click → Open, or:
-
-```bash
-cd ~/Desktop/VideoSeek && ./install-macos.command
-```
-
-The script picks a Python 3.11–3.13 interpreter (arm64 first), creates `~/.videoseek-venv`,
-auto-detects a local proxy (10808 / 7890 / 1087 / 6152 …), installs ~600 MB of dependencies from a
-China-friendly mirror, then self-checks the critical packages. Expect 5–15 minutes on first run.
-
-### 2. Import runtime assets
-
-The repo ships no models. Download `openai-clip.zip` (393 MB) and
-`rapidocr-zh-understanding.zip` (15 MB) from
+Download `openai-clip.zip` and `rapidocr-zh-understanding.zip` from
 [Releases — models](https://github.com/6v17/VideoSeek/releases/tag/models), then:
 
 ```bash
 ~/.videoseek-venv/bin/python scripts/import_runtime_resources.py openai-clip.zip rapidocr-zh-understanding.zip
-~/.videoseek-venv/bin/python scripts/import_runtime_resources.py --status   # three trues = ready
 ```
 
-The in-app **Import & parse** dialog writes through the same code path.
+(You can also use the in-app "Import & parse" dialog.)
 
 ### 3. Launch
 
-Double-click **`run-macos.command`**, then:
+Double-click **`run-macos.command`**, then: **Library / Photo Library** → add a folder → start indexing → search.
 
-**Local Library** → add a folder → select videos → **Sync selected** → **Search** → preview → export
+Full details in [`docs/quickstart.md`](docs/quickstart.md).
 
-## Known deltas
+---
 
-| Symptom | Cause | Handling |
-|---------|-------|----------|
-| `rookiepy` fails to build | no py3.13 arm64 wheel; unused in code | installer skips it |
-| `rapidocr-onnxruntime==1.4.4` fails | no arm64 wheel | installer falls back to `1.2.3`, OCR works |
-| "FFmpeg not found" | upstream only accepts ELF/PE magic | patched here for Mach-O |
-| Black preview | `python-vlc` can't locate libvlc | install VLC.app; `run-macos.command` exports `DYLD_LIBRARY_PATH` |
-| Slow indexing | CPU inference only, no DirectML/CUDA | expected; see [`docs/macos-notes.md`](docs/macos-notes.md#performance) |
-| Where is my data | — | `~/.videoseek/` (`config.json`, `models/`, `logs/`, `data/`) |
+## Feature overview
 
-## New: unified search over videos and photos
+| Feature | What it does |
+|---------|--------------|
+| **Video semantic search** | Describe a shot to find it, screenshot search, hard-subtitle OCR |
+| **Photo library** | Semantic image index + auto Chinese captions + people tags ([details](docs/image-library.md)) |
+| **Unified search** | One box searches videos + photos together |
+| **Chinese photo search** | Attribute → text → vector, three-level routing that actually works in Chinese |
+| **Export** | MP4 / Jianying draft / DaVinci / Premiere, drag-and-drop import |
 
-The second sidebar item, **Unified Search**, runs one query against both indexes and
-returns two groups: video moments on top, photos below.
+---
 
-- Videos go through the same engine the Agent API uses (`execute_agent_search`);
-  photos reuse the photo library's three recall channels (attributes → text →
-  vectors). The widget layer implements no retrieval logic of its own.
-- The two sides **fail independently**: a missing video index still returns photos,
-  and vice versa.
-- Double-click a video hit to jump to the search page and play that moment;
-  double-click a photo to open it with the system viewer.
-- No cross-modal re-ranking: video scores (0.3–0.45) and photo attribute scores
-  (0.95+) are not on the same scale, so one merged list would bury every video.
-- Measured on 1262 photos plus the existing video library: `黑色衣服` in 0.85 s,
-  photos-only in 16 ms, 15 s once per process for the CLIP warm-up.
+## Differences from upstream
 
-Details in [`docs/unified-search.md`](docs/unified-search.md).
+This fork only does **macOS platform adaptation and photo-capability enhancement**; the video indexing, search, and export core stays identical to upstream. Main changes:
+
+- New standalone **photo library** (separate index table — video index untouched)
+- New **unified search** (video + photo)
+- FFmpeg Mach-O detection (otherwise macOS reports "no FFmpeg")
+- Reuses the system VLC's libvlc for playback
+- Packaged as `.app` + icon, double-click to launch
+- Full English/Chinese macOS docs
+
+See [`docs/macos-notes.md`](docs/macos-notes.md) for the detailed delta list.
+
+---
 
 ## Documentation
 
-- [`docs/quickstart.md`](docs/quickstart.md) — macOS from-source setup, manual commands, checks
-- [`docs/image-library.md`](docs/image-library.md) — photo library: data model, three recall channels, captions, limits
-- [`docs/unified-search.md`](docs/unified-search.md) — unified search: how the two sides merge, why no merged ranking
-- [`docs/macos-notes.md`](docs/macos-notes.md) — code change, paths, deltas, troubleshooting, upstream sync
-- [`docs/architecture.md`](docs/architecture.md) — architecture (upstream text)
-- [`docs/for-agents.md`](docs/for-agents.md) — localhost Agent API (upstream text)
+- [`docs/quickstart.md`](docs/quickstart.md) — from-source install
+- [`docs/image-library.md`](docs/image-library.md) — photo library: data model, retrieval, people captions
+- [`docs/unified-search.md`](docs/unified-search.md) — unified search
+- [`docs/changelog.md`](docs/changelog.md) — changes & bug log
 
-## Syncing with upstream
-
-```bash
-git remote add upstream https://github.com/6v17/VideoSeek.git
-git fetch upstream && git merge upstream/master
-```
-
-The Mach-O check in `src/infra/ffmpeg_paths.py` may conflict on merge. **After resolving, verify the
-line is still there**, otherwise macOS silently loses FFmpeg again.
+---
 
 ## Credits & license
 
-- Original project and all core implementation: **[@6v17](https://github.com/6v17)** —
-  <https://github.com/6v17/VideoSeek>
-- This fork only adapts the platform. macOS-specific problems are welcome in this repo's issues;
-  **Windows bugs and feature requests belong upstream**.
+- Original project and all core implementation: **[@6v17](https://github.com/6v17)** — <https://github.com/6v17/VideoSeek>
+- This fork only adapts the platform and adds photo capability; Windows issues belong upstream.
 
-License: [AGPL-3.0](LICENSE) © 2026 [6v17](https://github.com/6v17). This fork is released under the
-same license; changes are listed in [NOTICE](NOTICE) as required by AGPL section 5.
+License: [AGPL-3.0](LICENSE) © 2026 [6v17](https://github.com/6v17).
 
 <details>
 <summary>Support the original author</summary>
@@ -190,14 +135,12 @@ same license; changes are listed in [NOTICE](NOTICE) as required by AGPL section
 
 ## Support this macOS fork
 
-If this macOS port helped you, feel free to buy me a coffee or get in touch:
+If this macOS port helped you, feel free to buy me a coffee:
 
 <p align="center">
-  <img src="docs/assets/wechat-donate.jpg" alt="WeChat donation QR" width="240">
-  &nbsp;&nbsp;&nbsp;&nbsp;
-  <img src="docs/assets/alipay.jpg" alt="Alipay transfer QR" width="240">
+  <img src="docs/assets/donate-card.png" alt="Buy me a coffee - WeChat / Alipay" width="520">
 </p>
 
 <p align="center">
-  Left: donation (WeChat) &nbsp;·&nbsp; Right: transfer (Alipay)
+  Left: WeChat　Right: Alipay
 </p>
