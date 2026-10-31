@@ -25,13 +25,39 @@
   <img src="docs/assets/图搜视频.png" alt="VideoSeek 搜索界面" width="800">
 </p>
 
+## 为什么值得用
+
+这个分支真正出彩的地方，是让「找素材」这件事对剪视频的人足够顺手：
+
+### 1. 视频 + 图片，一个框就能搜
+
+剪视频最花时间的不是剪，而是**找那段能用的素材**。上游只搜视频，这个分支补上了：
+
+- **中文搜图片** —— 说人话就能找到想要的图。`穿红裙的女人站在窗边`、`浅色衣服`、`肚子胖的人`、`穿得花哨的人`，这些问的是画面内容而不是文件名，也能精准命中（[图片库](docs/image-library.md)）。
+- **统一搜索** —— 一个输入框同时搜视频片段和图片，结果分组显示，视频走原来的语义引擎、图片走图片检索，各不干扰（[统一搜索](docs/unified-search.md)）。
+- **视频搜图不变** —— 原有视频语义检索、硬字幕 OCR、截图搜视频、导出 MP4/剪映，全部保留。
+
+### 2. 一次索引，之后秒开，还能增量更新
+
+- 素材**只需索引一次**，向量落盘（Lance），之后每次搜索都是毫秒级，不用重复等建库。
+- 支持**增量索引** —— 新加了素材只索引新增的部分，不必整库重跑，越用越顺手。
+
+### 3. 双击就能跑的 macOS 应用
+
+- 打包了 **VideoSeek.app** 和图标，放进 `/Applications` 或拖到 Dock，**双击图标直接启动**，不用每次去点脚本。
+- 想分享给没装环境的人，可以用 [`packaging/build-app.command`](packaging/build-app.command) 一键打包成独立整包。
+
+> 以上所有能力都**在本机完成**（ONNX · Lance · FFmpeg），素材**不上传**。
+
 ## 这个分支做了什么
 
 | 项目 | 上游 | 本分支 |
 |------|------|--------|
 | 目标平台 | Windows 10 / 11 | macOS 13+（Apple Silicon 优先，Intel 未实测） |
 | 安装方式 | 安装包 / 源码 | 双击 `install-macos.command` |
-| 启动方式 | `VideoSeek.exe` | 双击 `run-macos.command` |
+| 启动方式 | `VideoSeek.exe` | **双击 `VideoSeek.app`**（也可从 `/Applications` / Dock 启动，见 [`packaging/`](packaging/)） |
+| 打包 | 官方安装包 | **轻量 `.app` 启动器 + 图标**，`packaging/build-app.command` 一键重建，也可集成整包 |
+| 索引 | 一次性建库 | **支持增量索引**，新素材只索引新增部分 |
 | FFmpeg 识别 | 只认 ELF / PE 文件头 | **增加 Mach-O 判断**（不加会在 macOS 上误判为"没有 FFmpeg"） |
 | 播放组件 | `vlc_lib/` 内置 DLL | 复用 `/Applications/VLC.app` 的 libvlc |
 | 图片理解与检索 | 不支持图片文件 | **新增图片库**（独立 `image_assets` 表 + 人物描述 + 应用内页签），见 [`docs/image-library.md`](docs/image-library.md) |

@@ -28,13 +28,45 @@ export MP4, Jianying, or NLE timelines. Indexing stays on your machine (ONNX · 
   <img src="docs/assets/图搜视频.png" alt="VideoSeek search UI" width="800">
 </p>
 
+## Why this fork is worth using
+
+Three things make this fork genuinely useful for people who cut video:
+
+### 1. Search videos *and* photos from one box
+
+The painful part of editing is finding the right clip. Upstream only searches video; this fork adds:
+
+- **Chinese photo search** — describe the picture in plain words and it finds it. Queries like
+  "woman in a red dress by the window", "light clothes", "stocky person", "flashy outfit" ask about
+  what's *in* the frame, not filenames, and still hit ([image library](docs/image-library.md)).
+- **Unified search** — one box searches both video moments and photos, grouped results
+  ([unified search](docs/unified-search.md)).
+- **Video search unchanged** — semantic video search, hard-subtitle OCR, screenshot search, and
+  MP4 / Jianying export all remain.
+
+### 2. Index once, search instantly, update incrementally
+
+- Material is **indexed once**; vectors live on disk (Lance), so later searches are millisecond-fast.
+- **Incremental indexing** — new material only indexes the newly added parts, no full rebuild.
+
+### 3. A double-click macOS app
+
+- Ships as a **VideoSeek.app** with an icon — drop it in `/Applications` or the Dock and
+  **double-click to launch**, no script every time.
+- Use [`packaging/build-app.command`](packaging/build-app.command) to rebuild, or bundle a
+  standalone package for people without the environment.
+
+> Everything runs **locally** (ONNX · Lance · FFmpeg); media is **not uploaded**.
+
 ## What this fork changes
 
 | Area | Upstream | This fork |
 |------|----------|-----------|
 | Target platform | Windows 10 / 11 | macOS 13+ (Apple Silicon primary, Intel untested) |
 | Install | Installer / from source | Double-click `install-macos.command` |
-| Launch | `VideoSeek.exe` | Double-click `run-macos.command` |
+| Launch | `VideoSeek.exe` | **double-click `VideoSeek.app`** (also `/Applications` / Dock; see [`packaging/`](packaging/)) |
+| Packaging | official installer | **lightweight `.app` launcher + icon**; `packaging/build-app.command` rebuilds, or bundle standalone |
+| Indexing | one-shot build | **incremental indexing** — only new material is indexed |
 | FFmpeg detection | ELF / PE magic only | **adds Mach-O** (without it macOS reports "no FFmpeg") |
 | Playback | bundled `vlc_lib/` DLLs | reuses `libvlc` inside `/Applications/VLC.app` |
 | Docs | Windows-first | rewritten for macOS |
