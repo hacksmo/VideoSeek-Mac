@@ -22,7 +22,7 @@
 默认全程在本机索引（ONNX · Lance · FFmpeg），**不上传**素材。
 
 <p align="center">
-  <img src="docs/assets/图搜视频.png" alt="VideoSeek 搜索界面" width="800">
+  <img src="docs/assets/图片搜索.png" alt="图片库语义搜索界面" width="800">
 </p>
 
 ## 为什么值得用
@@ -193,8 +193,6 @@ git fetch upstream && git merge upstream/master
 ## 致谢与许可
 
 - 原始项目、全部核心实现：**[@6v17](https://github.com/6v17)** — <https://github.com/6v17/VideoSeek>
-- 上游官网与帮助：[lv17.top](https://www.lv17.top/)　QQ 群 `1033551438`
-- 上游使用教程：[飞书文档](https://ycnwd8tcjgtu.feishu.cn/docx/ZWkrdSqA6oJTOrxQ2XscxYtmnad)
 - 本分支只做平台适配，问题请先确认不是本分支引入的；针对 macOS 的问题，欢迎提到本仓库 Issues。
   **Windows 相关的 bug / 功能请求请去上游**。
 
@@ -215,11 +213,11 @@ git fetch upstream && git merge upstream/master
 如果你觉得这个 macOS 适配帮到了你，欢迎赞赏或联系交流：
 
 <p align="center">
-  <img src="docs/assets/donate.jpg" alt="赞赏码" width="240">
+  <img src="docs/assets/wechat-donate.jpg" alt="微信赞赏码" width="240">
   &nbsp;&nbsp;&nbsp;&nbsp;
-  <img src="docs/assets/contact.jpg" alt="联系二维码" width="240">
+  <img src="docs/assets/alipay.jpg" alt="支付宝转账码" width="240">
 </p>
 
 <p align="center">
-  左：赞赏码（开发不易，请我喝杯咖啡）　右：微信联系（极墨信息技术咨询工作室）
+  左：微信赞赏码（开发不易，请我喝杯咖啡）　右：支付宝转账码
 </p>

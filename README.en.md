@@ -25,7 +25,7 @@ export MP4, Jianying, or NLE timelines. Indexing stays on your machine (ONNX · 
 **media is not uploaded**.
 
 <p align="center">
-  <img src="docs/assets/图搜视频.png" alt="VideoSeek search UI" width="800">
+  <img src="docs/assets/图片搜索.png" alt="Photo library semantic search UI" width="800">
 </p>
 
 ## Why this fork is worth using
@@ -173,8 +173,6 @@ line is still there**, otherwise macOS silently loses FFmpeg again.
 
 - Original project and all core implementation: **[@6v17](https://github.com/6v17)** —
   <https://github.com/6v17/VideoSeek>
-- Upstream site / help: [lv17.top](https://www.lv17.top/) · QQ group `1033551438`
-- Upstream user guide (ZH): [Feishu doc](https://ycnwd8tcjgtu.feishu.cn/docx/ZWkrdSqA6oJTOrxQ2XscxYtmnad)
 - This fork only adapts the platform. macOS-specific problems are welcome in this repo's issues;
   **Windows bugs and feature requests belong upstream**.
 
@@ -195,11 +193,11 @@ same license; changes are listed in [NOTICE](NOTICE) as required by AGPL section
 If this macOS port helped you, feel free to buy me a coffee or get in touch:
 
 <p align="center">
-  <img src="docs/assets/donate.jpg" alt="Donate QR" width="240">
+  <img src="docs/assets/wechat-donate.jpg" alt="WeChat donation QR" width="240">
   &nbsp;&nbsp;&nbsp;&nbsp;
-  <img src="docs/assets/contact.jpg" alt="Contact QR" width="240">
+  <img src="docs/assets/alipay.jpg" alt="Alipay transfer QR" width="240">
 </p>
 
 <p align="center">
-  Left: donation (WeChat) &nbsp;·&nbsp; Right: contact (WeChat)
+  Left: donation (WeChat) &nbsp;·&nbsp; Right: transfer (Alipay)
 </p>
