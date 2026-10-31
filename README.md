@@ -210,14 +210,12 @@ git fetch upstream && git merge upstream/master
 
 ## 支持这个 macOS 分支
 
-如果你觉得这个 macOS 适配帮到了你，欢迎赞赏或联系交流：
+如果你觉得这个 macOS 适配帮到了你，欢迎请我喝杯咖啡：
 
 <p align="center">
-  <img src="docs/assets/wechat-donate.jpg" alt="微信赞赏码" width="240">
-  &nbsp;&nbsp;&nbsp;&nbsp;
-  <img src="docs/assets/alipay.jpg" alt="支付宝转账码" width="240">
+  <img src="docs/assets/donate-card.png" alt="请我喝杯咖啡 - 微信赞赏 / 支付宝转账" width="520">
 </p>
 
 <p align="center">
-  左：微信赞赏码（开发不易，请我喝杯咖啡）　右：支付宝转账码
+  左：微信赞赏码　右：支付宝转账码
 </p>
