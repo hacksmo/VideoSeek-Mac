@@ -712,6 +712,8 @@ class ImageLibraryPage(PageScaffold):
         self._last_query = ""
         self._index_after_scan = False
         self._index_started_at = 0.0
+        self._auto_index = False
+        self._last_auto_index = 0.0
         self._current_hit: dict = {}
         self._note = ""
         self._detail_key = ""
@@ -782,6 +784,10 @@ class ImageLibraryPage(PageScaffold):
             index_row.addWidget(button)
         self.chk_describe = QCheckBox(self._t["describe_toggle"])
         self.chk_describe.setToolTip("Settings → Understanding → model service → VLM")
+        # Describing is the whole point of the library (Chinese keyword search
+        # depends on captions), so default it on; the status refresh untick +
+        # disables it when no VLM is reachable.
+        self.chk_describe.setChecked(True)
         self.chk_force = QCheckBox(self._t["force_toggle"])
         index_row.addWidget(self.chk_describe)
         index_row.addWidget(self.chk_force)
@@ -1265,6 +1271,7 @@ class ImageLibraryPage(PageScaffold):
             self.progress_row.set_status_text("")
             self.lbl_status.setText(self._t["no_files"])
             self._index_after_scan = False
+            self._auto_index = False
             return
         self.lbl_status.setText(
             self._t["scanned"].format(count=len(self._scan_files), indexed=indexed)
@@ -1275,6 +1282,7 @@ class ImageLibraryPage(PageScaffold):
 
     def _on_scan_failed(self, message: str) -> None:
         self._index_after_scan = False
+        self._auto_index = False
         self.progress_row.set_progress_visible(False)
         self.lbl_status.setText(message)
 
@@ -1293,7 +1301,7 @@ class ImageLibraryPage(PageScaffold):
         if not paths:
             self.lbl_status.setText(self._t["no_files"])
             return
-        if len(paths) > 1500:
+        if len(paths) > 1500 and not self._auto_index:
             answer = QMessageBox.question(
                 self,
                 self._t["confirm_big_title"],
@@ -1313,7 +1321,7 @@ class ImageLibraryPage(PageScaffold):
 
         worker = _IndexWorker(
             paths,
-            describe=self.chk_describe.isChecked(),
+            describe=self.chk_describe.isChecked() or self._auto_index,
             force=self.chk_force.isChecked(),
             roots=self._roots,
             parent=self,
@@ -1342,6 +1350,7 @@ class ImageLibraryPage(PageScaffold):
         self.progress_row.set_status_text(text)
 
     def _on_index_finished(self, result: dict) -> None:
+        self._auto_index = False
         self.btn_index.setEnabled(True)
         self.btn_rescan.setEnabled(True)
         self.btn_stop.setEnabled(False)
@@ -1373,6 +1382,7 @@ class ImageLibraryPage(PageScaffold):
         self._run_search("browse", "")
 
     def _on_index_failed(self, message: str) -> None:
+        self._auto_index = False
         self.btn_index.setEnabled(True)
         self.btn_rescan.setEnabled(True)
         self.btn_stop.setEnabled(False)
@@ -1605,12 +1615,45 @@ class ImageLibraryPage(PageScaffold):
     # -- lifecycle ------------------------------------------------------
     def showEvent(self, event):  # noqa: N802 - Qt API
         super().showEvent(event)
-        if getattr(self, "_loaded_once", False):
+        if not getattr(self, "_loaded_once", False):
+            self._loaded_once = True
+            self._load_roots()
+            self.refresh_status()
+            QTimer.singleShot(150, lambda: self._run_search("browse", ""))
+        # Every time the page is shown, pick up photos added since the last
+        # visit without the user having to click "index". The scan is cheap
+        # (a filename walk) and index_images skips rows whose mtime is
+        # unchanged, so this stays an incremental pass even on a big library.
+        self._auto_check_new()
+
+    def _auto_check_new(self) -> None:
+        """Incrementally index newly added photos whenever the page is shown."""
+        if not self._roots:
             return
-        self._loaded_once = True
-        self._load_roots()
-        self.refresh_status()
-        QTimer.singleShot(150, lambda: self._run_search("browse", ""))
+        if self._scan_worker is not None and self._scan_worker.isRunning():
+            return
+        if self._index_worker is not None and self._index_worker.isRunning():
+            return
+        # Throttle: repeated showEvent storms (sidebar toggling, window focus)
+        # must not re-run the scan back to back.
+        now = time.time()
+        if now - self._last_auto_index < 30.0:
+            return
+        self._last_auto_index = now
+        self._auto_index = True
+        self._index_after_scan = True
+        self._start_scan("")
+
+    def auto_index_on_startup(self) -> None:
+        """Called by the main window right after startup.
+
+        Ensures newly added photos are indexed even when the user goes straight
+        to the unified search page without ever opening the library page.
+        """
+        if not getattr(self, "_loaded_once", False):
+            self._load_roots()
+        self._auto_check_new()
+
     def shutdown(self) -> None:
         """Stop background work before the page (or the app) goes away."""
         self._thumb_pump.stop()

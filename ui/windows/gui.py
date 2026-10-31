@@ -1140,8 +1140,18 @@ class MainWindow(
         self._apply_agent_api_settings()
         QTimer.singleShot(0, self._bootstrap_understanding_resources)
         QTimer.singleShot(1500, self._idle_maintain_library_metadata)
+        QTimer.singleShot(2200, self._auto_index_images)
         QTimer.singleShot(700, self._maybe_auto_show_startup_notices)
         _startup_logger.info("_finish_startup_sequence total %.2fs", time.perf_counter() - t0)
+
+    def _auto_index_images(self) -> None:
+        """Incrementally index newly added photos after startup (no UI click needed)."""
+        try:
+            self.images_page.auto_index_on_startup()
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui.py:_auto_index_images")
 
     def _idle_maintain_library_metadata(self) -> None:
         try:
