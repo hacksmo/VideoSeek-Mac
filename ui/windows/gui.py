@@ -1417,22 +1417,26 @@ class MainWindow(
         )
         self.sidebar.btn_donate.setText("❤")
         self.sidebar.btn_donate.setToolTip(t["donate_tooltip"])
+        # 主题 / GitHub / B 站 / QQ 群 / 捐赠 图标按钮已从侧边栏移除（见
+        # components.py），这里保持隐藏，不再按 social 配置重新显示。
+        self.sidebar.btn_theme.setVisible(False)
+        self.sidebar.btn_donate.setVisible(False)
         self.sidebar.btn_github.setIcon(github_toolbar_icon(is_dark=self.is_dark_mode))
         self.sidebar.btn_github.setIconSize(icon_size)
         self.sidebar.btn_github.setToolTip(t["sidebar_github_tooltip"])
-        self.sidebar.btn_github.setVisible(bool(social.get("github_url")))
+        self.sidebar.btn_github.setVisible(False)
 
         has_bilibili = bool(social.get("bilibili_url"))
         self.sidebar.btn_bilibili.setIcon(bilibili_toolbar_icon())
         self.sidebar.btn_bilibili.setIconSize(icon_size)
         self.sidebar.btn_bilibili.setToolTip(t["sidebar_bilibili_tooltip"])
-        self.sidebar.btn_bilibili.setVisible(has_bilibili)
+        self.sidebar.btn_bilibili.setVisible(False)
 
         has_qq = bool(social.get("qq_url"))
         self.sidebar.btn_qq.setIcon(qq_toolbar_icon())
         self.sidebar.btn_qq.setIconSize(icon_size)
         self.sidebar.btn_qq.setToolTip(t["sidebar_qq_tooltip"])
-        self.sidebar.btn_qq.setVisible(has_qq)
+        self.sidebar.btn_qq.setVisible(False)
 
     def start_search(self):
         if not self._ensure_startup_migration_idle("feature_search"):

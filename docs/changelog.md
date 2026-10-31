@@ -1,8 +1,12 @@
 # 变更与 Bug 记录（Changelog & Bug Log）
 
-> **给后续 AI 会话的快速导航**：切换模型后想快速了解这个项目、避免全量读代码浪费 token，请按顺序读本文件 →
-> 需要图片库细节再看 `docs/image-library.md`，架构见 `docs/architecture.md`，工程约定见 `docs/engineering.md`。
-> 每个条目都标了**根因 + 修复位置 + 相关 commit**，可直接定位。
+> **给后续 AI 会话的快速导航（先读这两个文档，避免全量读代码）：**
+>
+> 1. **本文 `docs/changelog.md`** —— 改动历史 + bug 根因，按时间倒序，每条标「现象/根因/修复位置/commit」。
+> 2. **`docs/image-library.md`** —— 图片库功能细节（数据模型、检索、代码位置）。
+>
+> 需要整体架构再看 `docs/architecture.md`，工程约定看 `docs/engineering.md`。
+> 切换模型后建议直接读这两个文档 + 按需读架构文档，而非重读源码。
 
 ---
 
@@ -10,9 +14,11 @@
 
 | 主题 | 章节 | 一句话 |
 |------|------|--------|
-| 图片库删除功能 | [未提交改动](#未提交改动-2026-10-31) | 右键/详情删除，走废纸篓，新增 `delete_image` |
-| 启动 VLM 服务 | [未提交改动](#未提交改动-2026-10-31) | 图片库「启动服务」按钮，`launch_vlm_service` |
-| 界面空间精简 | [未提交改动](#未提交改动-2026-10-31) | 隐藏 subtitle/提示行/侧边栏低频按钮 |
+| 图片库删除功能 | [已提交 85eb211](#已提交2026-10-31--commit-85eb211) | 右键/详情删除，走废纸篓，新增 `delete_image` |
+| 启动 VLM 服务 | [已提交 85eb211](#已提交2026-10-31--commit-85eb211) | 图片库「启动服务」按钮，`launch_vlm_service` |
+| 界面空间精简 | [已提交 85eb211](#已提交2026-10-31--commit-85eb211) | 隐藏 subtitle/提示行/侧边栏低频按钮 |
+| 删侧边栏按钮 | [已提交后续](#已提交2026-10-31--commit-后续) | 隐藏语言/主题/GitHub/B站/QQ |
+| 图片库左栏布局 | [已提交后续](#已提交2026-10-31--commit-后续) | 功能模块挪到左侧，右侧全给图片 |
 | 拖拽变成框选 | [2026-10-31](#2026-10-31) | 模型缺 `ItemIsDragEnabled` 标志 |
 | 自动增量索引 | [2026-10-31](#2026-10-31) | 打开软件自动检查新增图并索引+描述 |
 | git 推 GitHub 502 | [2026-10-30](#2026-10-30) | 代理被污染，per-url 代理 + 重试别名 |
@@ -22,9 +28,9 @@
 
 ---
 
-## 未提交改动（2026-10-31）
+## 已提交（2026-10-31 · commit `85eb211`）
 
-**图片库四项升级**（尚未 commit，本地工作区 4 个文件改动，+384 行）：
+**图片库四项升级**（删除、启动服务、界面精简、侧边栏精简）：
 
 1. **删除图片功能**
    - 根因：图片库原本只能"看"，无法删除素材，用户没法在库内清理。
@@ -46,6 +52,28 @@
    - 改动：
      - `image_library_page.py`：隐藏 header 副标题、`lbl_attr_hint`、`lbl_grid_hint` 三行说明性文字（信息仍在 tooltip/右键菜单）。
      - `ui/widgets/components.py`：`NavigationSidebar` 隐藏 `btn_notice`/`btn_about`/`btn_donate`（对象保留，仅 `hide()`，避免 `gui.py` 等处的引用报错）。
+
+---
+
+## 已提交（2026-10-31 · commit 后续）
+
+**三项后续调整**（删侧边栏按钮、图片库左栏布局、文档导航）：
+
+1. **删除侧边栏低频按钮**
+   - 需求：删掉左下角的英文切换、主题切换、GitHub、B 站、QQ 群按钮。
+   - 改动：
+     - `ui/widgets/components.py`：隐藏 `btn_language`、`btn_theme`、`btn_github`、`btn_bilibili`、`btn_qq`，并隐藏空的 `footer_icon_row`。
+     - `ui/windows/gui.py`：`_refresh_sidebar_icon_buttons` 里把这些按钮改为恒 `setVisible(False)`（否则会因 social 配置 `github_url`/`bilibili_url`/`qq_url` 存在而被重新 show）。
+   - 注意：主题切换入口仍在「设置」页；语言切换功能仍可用（按钮隐藏不代表功能删除）。
+
+2. **图片库左栏布局重构**
+   - 需求：把「照片目录」整块（添加/移除/打开、路径列表、重扫/清理、开始索引/停止、描述/强制 checkbox、启动服务）从顶部挪到页面左侧，右侧全给检索 + 缩略图网格 + 详情。
+   - 改动：`ui/widgets/image_library_page.py` 的 `_build_library_card` / `_build_search_card` 改为 `return card`，`__init__` 用水平 `QSplitter`（`ImageLibraryMainSplitter`）组装：左 `library_card`（min 260 / max 420 宽，竖排紧凑布局），右 `search_card`（拉伸 1）。可拖动分栏调宽。
+   - 原 `library_card` 内的按钮从「水平一排」改为「窄栏竖排 + 两两并排」，适配窄侧栏。
+
+3. **文档导航明确「先读两个文档」**
+   - 需求：切换模型时希望新 AI 能直接找到技术文档和所有更改，不读代码。
+   - 改动：`docs/changelog.md` 顶部导航明确「先读 `docs/changelog.md` + `docs/image-library.md`」，架构再读 `architecture.md` / `engineering.md`。
 
 ---
 

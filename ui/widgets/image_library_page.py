@@ -803,37 +803,57 @@ class ImageLibraryPage(PageScaffold):
         # 顶部说明文字不占空间：隐藏 subtitle，把空间留给缩略图网格。
         self.header.subtitle.hide()
 
-        self._build_library_card()
-        self._build_search_card()
+        library_card = self._build_library_card()
+        search_card = self._build_search_card()
+
+        # 布局：左侧窄栏放「照片目录」控制（添加/索引/启动服务等），右侧全部
+        # 让给检索控件 + 缩略图网格 + 详情。用水平 splitter 便于拖动调宽。
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setObjectName("ImageLibraryMainSplitter")
+        splitter.setChildrenCollapsible(False)
+        splitter.addWidget(library_card)
+        splitter.addWidget(search_card)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([300, 900])
+        library_card.setMinimumWidth(260)
+        library_card.setMaximumWidth(420)
+        self._main_splitter = splitter
+        self.content_layout.addWidget(splitter, 1)
+
         self._decorate()
 
     # -- construction ---------------------------------------------------
-    def _build_library_card(self) -> None:
-        card = VSCard("panel", margins=(16, 14, 16, 14), spacing=10)
-        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+    def _build_library_card(self) -> QWidget:
+        # 窄侧栏：卡片高度自适应内容，宽度由外层 splitter 控制（260~420）。
+        card = VSCard("panel", margins=(14, 12, 14, 12), spacing=10)
+        card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         column = card.content_layout
 
         title = QLabel(self._t["library_card"])
         title.setObjectName("SectionTitle")
         column.addWidget(title)
 
-        actions = QHBoxLayout()
-        actions.setSpacing(8)
+        # 添加文件夹占整行，移除选中 / 打开目录 并排。
         self.btn_add_root = QPushButton(self._t["add_root"])
         set_button_role(self.btn_add_root, "PrimaryButton")
+        self.btn_add_root.setCursor(Qt.CursorShape.PointingHandCursor)
+        column.addWidget(self.btn_add_root)
+
+        root_actions = QHBoxLayout()
+        root_actions.setSpacing(8)
         self.btn_remove_root = QPushButton(self._t["remove_root"])
         set_button_role(self.btn_remove_root, "GhostButton")
         self.btn_open_root = QPushButton(self._t["open_root"])
         set_button_role(self.btn_open_root, "GhostButton")
-        for button in (self.btn_add_root, self.btn_remove_root, self.btn_open_root):
+        for button in (self.btn_remove_root, self.btn_open_root):
             button.setCursor(Qt.CursorShape.PointingHandCursor)
-            actions.addWidget(button)
-        actions.addStretch(1)
-        column.addLayout(actions)
+            root_actions.addWidget(button)
+        column.addLayout(root_actions)
 
         self.roots_list = QListWidget()
         self.roots_list.setObjectName("ImageRootsList")
-        self.roots_list.setFixedHeight(74)
+        self.roots_list.setMinimumHeight(96)
         self.roots_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         column.addWidget(self.roots_list)
 
@@ -842,21 +862,33 @@ class ImageLibraryPage(PageScaffold):
         self.roots_hint.setWordWrap(True)
         column.addWidget(self.roots_hint)
 
-        index_row = QHBoxLayout()
-        index_row.setSpacing(8)
+        # 重新扫描 / 清理失效 并排。
+        scan_row = QHBoxLayout()
+        scan_row.setSpacing(8)
         self.btn_rescan = QPushButton(self._t["rescan"])
         set_button_role(self.btn_rescan, "GhostButton")
         self.btn_prune = QPushButton(self._t["prune"])
         set_button_role(self.btn_prune, "GhostButton")
         self.btn_prune.setToolTip("文件被移动或删除后，索引里的旧记录会留下空白缩略图")
+        for button in (self.btn_rescan, self.btn_prune):
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            scan_row.addWidget(button)
+        column.addLayout(scan_row)
+
+        # 开始索引 / 停止 并排。
+        index_row = QHBoxLayout()
+        index_row.setSpacing(8)
         self.btn_index = QPushButton(self._t["start_index"])
         set_button_role(self.btn_index, "AccentGhostButton")
         self.btn_stop = QPushButton(self._t["stop"])
         set_button_role(self.btn_stop, "DangerGhostButton")
         self.btn_stop.setEnabled(False)
-        for button in (self.btn_rescan, self.btn_prune, self.btn_index, self.btn_stop):
+        for button in (self.btn_index, self.btn_stop):
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             index_row.addWidget(button)
+        column.addLayout(index_row)
+
+        # 描述 / 强制重算 两个开关，竖排。
         self.chk_describe = QCheckBox(self._t["describe_toggle"])
         self.chk_describe.setToolTip("Settings → Understanding → model service → VLM")
         # Describing is the whole point of the library (Chinese keyword search
@@ -864,10 +896,8 @@ class ImageLibraryPage(PageScaffold):
         # disables it when no VLM is reachable.
         self.chk_describe.setChecked(True)
         self.chk_force = QCheckBox(self._t["force_toggle"])
-        index_row.addWidget(self.chk_describe)
-        index_row.addWidget(self.chk_force)
-        index_row.addStretch(1)
-        column.addLayout(index_row)
+        column.addWidget(self.chk_describe)
+        column.addWidget(self.chk_force)
 
         self.progress_row = VSProgressStatusRow(card)
         # The shared row styles its label as a short accent chip; indexing text
@@ -883,17 +913,14 @@ class ImageLibraryPage(PageScaffold):
         column.addWidget(self.lbl_status)
 
         # 启动本地 VLM 服务按钮：仅当服务未就绪且是本地预设时显示。
-        status_row = QHBoxLayout()
-        status_row.setSpacing(8)
         self.btn_start_service = QPushButton(self._t["start_service"])
         set_button_role(self.btn_start_service, "AccentGhostButton")
         self.btn_start_service.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_start_service.hide()
-        status_row.addWidget(self.btn_start_service)
-        status_row.addStretch(1)
-        column.addLayout(status_row)
+        column.addWidget(self.btn_start_service)
 
-        self.content_layout.addWidget(card)
+        column.addStretch(1)
+        return card
 
     def _build_search_card(self) -> None:
         card = VSCard("panel", margins=(16, 14, 16, 14), spacing=10)
@@ -1012,7 +1039,7 @@ class ImageLibraryPage(PageScaffold):
         splitter.setChildrenCollapsible(False)
         column.addWidget(splitter, 1)
 
-        self.content_layout.addWidget(card, 1)
+        return card
 
     def _build_detail_panel(self) -> QWidget:
         panel = QFrame()

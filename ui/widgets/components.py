@@ -338,10 +338,11 @@ class NavigationSidebar(QWidget):
         set_button_role(self.btn_about, "GhostButton", chrome="sidebarFooter")
         self.btn_language = QPushButton("EN")
         set_button_role(self.btn_language, "GhostButton", chrome="sidebarFooterGhost")
-        # 公告 / 关于 / 捐赠 这些低频按钮会挤占侧边栏空间，直接隐藏（对象保留，
-        # 避免 gui.py 里对它们的引用报错）。
+        # 公告 / 关于 / 捐赠 / 语言切换 这些低频按钮会挤占侧边栏空间，直接隐藏
+        # （对象保留，避免 gui.py 里对它们的引用报错）。
         self.btn_notice.hide()
         self.btn_about.hide()
+        self.btn_language.hide()
 
         self.footer_icon_row = QWidget()
         footer_icon_layout = QHBoxLayout(self.footer_icon_row)
@@ -354,6 +355,7 @@ class NavigationSidebar(QWidget):
         self.btn_theme.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         _apply_sidebar_footer_icon_size(self.btn_theme)
         _apply_sidebar_icon_font(self.btn_theme)
+        self.btn_theme.hide()
 
         self.btn_donate = QToolButton()
         self.btn_donate.setObjectName("SidebarDonateButton")
@@ -367,6 +369,9 @@ class NavigationSidebar(QWidget):
         self.btn_github = _make_sidebar_icon_button()
         self.btn_bilibili = _make_sidebar_icon_button()
         self.btn_qq = _make_sidebar_icon_button()
+        # 主题 / GitHub / B 站 / QQ 群 等图标按钮全部隐藏，侧边栏只保留核心导航。
+        for button in (self.btn_github, self.btn_bilibili, self.btn_qq):
+            button.hide()
 
         for button in (
             self.btn_theme,
@@ -385,6 +390,8 @@ class NavigationSidebar(QWidget):
         for button in [self.btn_theme, self.btn_donate, self.btn_github, self.btn_bilibili, self.btn_qq]:
             button.setCursor(Qt.PointingHandCursor)
 
+        # footer 里所有图标按钮都已隐藏，整行不再显示，避免空占位。
+        self.footer_icon_row.hide()
         layout.addWidget(self.footer_icon_row)
 
     def _build_nav_button(self, text, checked=False):
