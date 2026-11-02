@@ -155,6 +155,9 @@ _STRINGS = {
         "start_service": "启动服务",
         "service_launching": "正在启动服务…",
         "service_launched": "服务已启动：{message}",
+        "service_waiting": "服务已启动，正在等待就绪…（第 {count}/{total} 次探测）",
+        "service_ready": "服务已就绪，可以开始生成描述了",
+        "service_timeout": "服务已启动，但 30 秒内仍未就绪。请确认 {name} 已打开且模型已加载，再点「开始索引」。",
         "service_failed": "启动失败：{message}",
     },
     "en": {
@@ -233,6 +236,9 @@ _STRINGS = {
         "start_service": "Start service",
         "service_launching": "Starting service…",
         "service_launched": "Service started: {message}",
+        "service_waiting": "Service started, waiting for it to be ready… (probe {count}/{total})",
+        "service_ready": "Service is ready — you can now start describing",
+        "service_timeout": "Service started but not ready within 30s. Confirm {name} is open and its model has loaded, then click \"Start indexing\".",
         "service_failed": "Failed to start: {message}",
     },
 }
@@ -782,6 +788,12 @@ class ImageLibraryPage(PageScaffold):
         self._status_worker = None
         self._delete_worker = None
         self._launch_worker = None
+        self._service_wait_probes = 0
+        self._service_wait_total = 12
+        self._service_name = ""
+        self._service_wait_timer = QTimer(self)
+        self._service_wait_timer.setInterval(2500)
+        self._service_wait_timer.timeout.connect(self._on_service_wait_tick)
         self._scan_files: list[str] = []
         self._last_query = ""
         self._index_after_scan = False
@@ -1307,6 +1319,11 @@ class ImageLibraryPage(PageScaffold):
 
     def _on_status_ready(self, status: dict) -> None:
         self._status = dict(status or {})
+        # If we're polling for the service to come up, a ready VLM ends the wait.
+        if self._service_wait_timer.isActive() and status.get("vlm_ready"):
+            self._service_wait_timer.stop()
+            self._service_wait_probes = 0
+            self._note = self._t["service_ready"]
         self._render_status()
 
     def _render_status(self) -> None:
@@ -1802,11 +1819,27 @@ class ImageLibraryPage(PageScaffold):
         result = result or {}
         message = str(result.get("message") or "")
         if result.get("launched"):
+            # Start a polling loop: the external service needs time to bind its
+            # port and load the model, so probe every 2.5s and report progress.
+            self._service_name = str(result.get("name") or "服务").strip()
+            self._service_wait_probes = 0
             self._note = self._t["service_launched"].format(message=message)
-            # Give the external service a moment to bind its port, then re-probe.
-            QTimer.singleShot(1500, self.refresh_status)
+            self._render_status()
+            self._service_wait_timer.start()
         else:
+            self._service_wait_timer.stop()
             self.lbl_status.setText(self._t["service_failed"].format(message=message))
+
+    def _on_service_wait_tick(self) -> None:
+        self._service_wait_probes += 1
+        if self._service_wait_probes > self._service_wait_total:
+            self._service_wait_timer.stop()
+            self._note = self._t["service_timeout"].format(name=self._service_name)
+            self._render_status()
+            return
+        self._note = self._t["service_waiting"].format(
+            count=self._service_wait_probes, total=self._service_wait_total
+        )
         self.refresh_status()
 
     def _on_service_launch_failed(self, message: str) -> None:
@@ -1896,6 +1929,7 @@ class ImageLibraryPage(PageScaffold):
         ``QThread`` (which aborts the process at exit).
         """
         self._thumb_pump.stop()
+        self._service_wait_timer.stop()
         deadline = time.time() + 4.0
         for name in (
             "_index_worker",

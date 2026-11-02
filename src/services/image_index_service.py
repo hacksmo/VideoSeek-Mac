@@ -1133,7 +1133,6 @@ def _trash_file(path: str) -> tuple[bool, str]:
     Returns ``(ok, error)``. Falls back to a no-op with an error message when no
     trash mechanism is available, rather than permanently deleting the file.
     """
-    import shutil
     import subprocess
     import sys
 
@@ -1244,5 +1243,6 @@ def launch_vlm_service(*, config=None) -> dict:
     name = "Ollama" if preset == "ollama" else "LM Studio"
     return {
         "launched": True,
-        "message": f"已尝试启动 {name}，请稍候片刻后刷新状态",
+        "name": name,
+        "message": f"已尝试启动 {name}",
     }
