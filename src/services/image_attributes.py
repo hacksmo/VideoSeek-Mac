@@ -80,6 +80,88 @@ GROUPS: dict[str, dict[str, tuple[str, ...]]] = {
         "素净": ("a photo of a person wearing a plain simple solid color outfit",),
         "正装": ("a photo of a person wearing a formal business suit",),
         "休闲": ("a photo of a person in casual streetwear",),
+        # 男装细分风格（老钱风等）
+        "老钱风": (
+            "a photo of a person wearing an old money aesthetic outfit with "
+            "quiet luxury, high quality natural fabrics, neutral tones, a "
+            "classic knit polo, tailored trousers and leather loafers",
+        ),
+        "工装风": (
+            "a photo of a person wearing a rugged workwear outfit such as a "
+            "denim or chore jacket, cargo pants and boots",
+        ),
+        "学院风": (
+            "a photo of a person wearing a preppy ivy league outfit such as a "
+            "blazer, knit sweater, oxford shirt and chinos",
+        ),
+        "运动风": (
+            "a photo of a person wearing sporty athletic clothes such as a "
+            "tracksuit, hoodie and sneakers",
+        ),
+        "商务休闲": (
+            "a photo of a person wearing business casual clothes such as a "
+            "button-up shirt with chinos and a blazer without a tie",
+        ),
+        "街头风": (
+            "a photo of a person wearing streetwear such as a graphic hoodie, "
+            "oversized tee, cargo pants and sneakers",
+        ),
+    },
+    "clothing": {
+        "衬衫": (
+            "a photo of a person wearing a button-up dress shirt",
+            "a photo of a person wearing a collared shirt",
+        ),
+        "T恤": (
+            "a photo of a person wearing a short sleeve t-shirt",
+            "a photo of a person wearing a crew neck tee",
+        ),
+        "Polo衫": (
+            "a photo of a person wearing a collared polo shirt",
+        ),
+        "毛衣": (
+            "a photo of a person wearing a knit sweater or jumper",
+        ),
+        "卫衣": (
+            "a photo of a person wearing a hoodie or crewneck sweatshirt",
+        ),
+        "西装外套": (
+            "a photo of a person wearing a tailored blazer or suit jacket",
+        ),
+        "夹克": (
+            "a photo of a person wearing a casual jacket such as a bomber or "
+            "denim jacket",
+        ),
+        "风衣": (
+            "a photo of a person wearing a trench coat or windbreaker",
+        ),
+        "大衣": (
+            "a photo of a person wearing a long wool overcoat",
+        ),
+        "羽绒服": (
+            "a photo of a person wearing a puffy down jacket",
+        ),
+        "西裤": (
+            "a photo of a person wearing tailored dress trousers",
+        ),
+        "牛仔裤": (
+            "a photo of a person wearing denim jeans",
+        ),
+        "短裤": (
+            "a photo of a person wearing shorts",
+        ),
+        "运动裤": (
+            "a photo of a person wearing sweatpants or joggers",
+        ),
+        "马甲": (
+            "a photo of a person wearing a vest or waistcoat",
+        ),
+        "针织开衫": (
+            "a photo of a person wearing a knitted cardigan",
+        ),
+        "背心": (
+            "a photo of a person wearing a sleeveless tank top or vest",
+        ),
     },
     "person": {
         "有人": ("a photo of a person, portrait of somebody",),
@@ -92,6 +174,7 @@ GROUP_TITLES = {
     "build": "体型",
     "height": "身高",
     "style": "穿搭风格",
+    "clothing": "服装单品",
     "person": "有没有人",
 }
 
@@ -101,7 +184,7 @@ LOW_CONFIDENCE_GROUPS = frozenset({"height"})
 
 # A photo that is mostly scenery/fabric still scores high on some colour prompt,
 # so person-flavoured queries should also require the 有人 label.
-_PERSON_GATED_GROUPS = frozenset({"color", "build", "height", "style"})
+_PERSON_GATED_GROUPS = frozenset({"color", "build", "height", "style", "clothing"})
 
 _NEG_PREFIX = frozenset("不没别非免")
 
@@ -181,8 +264,50 @@ _LEXICON: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("商务", "style", ("正装",)),
     ("休闲", "style", ("休闲",)),
     ("日常", "style", ("休闲",)),
-    ("街头", "style", ("休闲",)),
-    ("运动", "style", ("休闲",)),
+    ("街头风", "style", ("街头风",)),
+    ("街头", "style", ("街头风",)),
+    ("运动风", "style", ("运动风",)),
+    ("运动", "style", ("运动风",)),
+    ("老钱风", "style", ("老钱风",)),
+    ("老钱", "style", ("老钱风",)),
+    ("静奢风", "style", ("老钱风",)),
+    ("静奢", "style", ("老钱风",)),
+    ("低调奢华", "style", ("老钱风",)),
+    ("工装风", "style", ("工装风",)),
+    ("工装", "style", ("工装风",)),
+    ("学院风", "style", ("学院风",)),
+    ("学院", "style", ("学院风",)),
+    ("商务休闲", "style", ("商务休闲",)),
+    ("smart casual", "style", ("商务休闲",)),
+    # 服装单品
+    ("西装外套", "clothing", ("西装外套", "正装")),
+    ("西裤", "clothing", ("西裤",)),
+    ("衬衫", "clothing", ("衬衫",)),
+    ("衬衣", "clothing", ("衬衫",)),
+    ("polo衫", "clothing", ("Polo衫",)),
+    ("polo", "clothing", ("Polo衫",)),
+    ("t恤", "clothing", ("T恤",)),
+    ("t裇", "clothing", ("T恤",)),
+    ("短袖", "clothing", ("T恤",)),
+    ("毛衣", "clothing", ("毛衣",)),
+    ("针织衫", "clothing", ("毛衣",)),
+    ("卫衣", "clothing", ("卫衣",)),
+    ("连帽衫", "clothing", ("卫衣",)),
+    ("夹克", "clothing", ("夹克",)),
+    ("外套", "clothing", ("夹克",)),
+    ("风衣", "clothing", ("风衣",)),
+    ("大衣", "clothing", ("大衣",)),
+    ("羽绒服", "clothing", ("羽绒服",)),
+    ("棉服", "clothing", ("羽绒服",)),
+    ("牛仔裤", "clothing", ("牛仔裤",)),
+    ("牛仔", "clothing", ("牛仔裤",)),
+    ("短裤", "clothing", ("短裤",)),
+    ("运动裤", "clothing", ("运动裤",)),
+    ("马甲", "clothing", ("马甲",)),
+    ("针织开衫", "clothing", ("针织开衫",)),
+    ("开衫", "clothing", ("针织开衫",)),
+    ("背心", "clothing", ("背心",)),
+    ("吊带", "clothing", ("背心",)),
 )
 
 # Longest-first so 浅色系 resolves before 浅色, and a needle never shadows a
