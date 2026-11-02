@@ -796,6 +796,8 @@ class ImageLibraryPage(PageScaffold):
         self._service_wait_timer.timeout.connect(self._on_service_wait_tick)
         self._scan_files: list[str] = []
         self._last_query = ""
+        self._last_search_mode = "browse"
+        self._last_search_query = ""
         self._index_after_scan = False
         self._index_started_at = 0.0
         self._auto_index = False
@@ -1583,6 +1585,10 @@ class ImageLibraryPage(PageScaffold):
         if self._search_worker is not None and self._search_worker.isRunning():
             return
         self._last_query = str(query or "")
+        # Remember the current view so a delete can re-run this exact search
+        # instead of resetting to "browse all".
+        self._last_search_mode = str(mode or "browse")
+        self._last_search_query = str(query or "")
         self.lbl_search_status.setText(self._t["searching"])
         self.btn_search.setEnabled(False)
         worker = _SearchWorker(
@@ -1798,8 +1804,9 @@ class ImageLibraryPage(PageScaffold):
         self._current_hit = {}
         self._clear_detail()
         self.refresh_status()
-        # Re-run the current view so the removed image disappears from the grid.
-        self._run_search("browse", "")
+        # Re-run the *current* search (not "browse all") so the removed image
+        # disappears from the grid but the user stays on their result view.
+        self._run_search(self._last_search_mode, self._last_search_query)
 
     def _on_delete_failed(self, message: str) -> None:
         self.lbl_status.setText(self._t["delete_failed"].format(error=message))
