@@ -53,6 +53,7 @@ from ui.widgets.components import (
 )
 from ui.widgets.understanding_page import UnderstandingEvidencePage
 from ui.widgets.image_library_page import ImageLibraryPage
+from ui.widgets.pdf_library_page import PdfLibraryPage
 from ui.widgets.unified_search_page import UnifiedSearchPage
 from ui.widgets.settings import SettingsPage
 from ui.widgets.scaffold import make_runtime_inline_tip
@@ -127,6 +128,7 @@ class MainWindow(
         "unified",
         "library",
         "images",
+        "documents",
         "understanding",
         "link",
         "settings",
@@ -296,6 +298,7 @@ class MainWindow(
         self.link_page = LinkSearchPage()
         self.library_page = LibraryPage()
         self.images_page = ImageLibraryPage()
+        self.documents_page = PdfLibraryPage()
         self.unified_page = UnifiedSearchPage()
         self.understanding_page = UnderstandingEvidencePage()
         self.understanding_services_dialog = self.understanding_page.services_panel
@@ -306,6 +309,11 @@ class MainWindow(
             "images",
             self.texts.get("nav_images", "图片库"),
             insert_after="library",
+        )
+        self.sidebar.register_nav_page(
+            "documents",
+            self.texts.get("nav_documents", "文档库"),
+            insert_after="images",
         )
         self.sidebar.register_nav_page(
             "unified",
@@ -339,6 +347,7 @@ class MainWindow(
             # Owns its scrolling (virtualised grid); an outer QScrollArea would
             # fight the results list for the wheel.
             "images": lambda: self.images_page,
+            "documents": lambda: self.documents_page,
             "understanding": lambda: self._build_scroll_page(self.understanding_page),
             "link": lambda: self._build_scroll_page(self.link_page),
             "settings": lambda: self.settings_page,
@@ -418,6 +427,8 @@ class MainWindow(
         self.sidebar.btn_page_library.clicked.connect(lambda: self.switch_page("library"))
         if hasattr(self.sidebar, "btn_page_images"):
             self.sidebar.btn_page_images.clicked.connect(lambda: self.switch_page("images"))
+        if hasattr(self.sidebar, "btn_page_documents"):
+            self.sidebar.btn_page_documents.clicked.connect(lambda: self.switch_page("documents"))
         if hasattr(self.sidebar, "btn_page_unified"):
             self.sidebar.btn_page_unified.clicked.connect(lambda: self.switch_page("unified"))
         self.sidebar.btn_page_understanding.clicked.connect(lambda: self.switch_page("understanding"))
@@ -1416,7 +1427,6 @@ class MainWindow(
 
     def _refresh_sidebar_icon_buttons(self, texts=None):
         t = texts or self.texts
-        social = get_donate_payload()
         icon_size = sidebar_toolbar_icon_size()
         self.sidebar.btn_theme.setText("☀" if self.is_dark_mode else "🌙")
         self.sidebar.btn_theme.setToolTip(
@@ -1433,13 +1443,11 @@ class MainWindow(
         self.sidebar.btn_github.setToolTip(t["sidebar_github_tooltip"])
         self.sidebar.btn_github.setVisible(False)
 
-        has_bilibili = bool(social.get("bilibili_url"))
         self.sidebar.btn_bilibili.setIcon(bilibili_toolbar_icon())
         self.sidebar.btn_bilibili.setIconSize(icon_size)
         self.sidebar.btn_bilibili.setToolTip(t["sidebar_bilibili_tooltip"])
         self.sidebar.btn_bilibili.setVisible(False)
 
-        has_qq = bool(social.get("qq_url"))
         self.sidebar.btn_qq.setIcon(qq_toolbar_icon())
         self.sidebar.btn_qq.setIconSize(icon_size)
         self.sidebar.btn_qq.setToolTip(t["sidebar_qq_tooltip"])

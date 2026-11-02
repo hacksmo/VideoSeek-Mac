@@ -24,6 +24,9 @@ class ApplyTextsGuiMixin:
         nav_images = self.sidebar.nav_button("images")
         if nav_images is not None:
             nav_images.setText(t.get("nav_images", "图片库"))
+        nav_documents = self.sidebar.nav_button("documents")
+        if nav_documents is not None:
+            nav_documents.setText(t.get("nav_documents", "文档库"))
         nav_unified = self.sidebar.nav_button("unified")
         if nav_unified is not None:
             nav_unified.setText(t.get("nav_unified", "统一搜索"))
@@ -33,6 +36,9 @@ class ApplyTextsGuiMixin:
         images_page = getattr(self, "images_page", None)
         if images_page is not None:
             images_page.apply_texts(getattr(self, "language", "zh"))
+        documents_page = getattr(self, "documents_page", None)
+        if documents_page is not None:
+            documents_page.apply_texts(getattr(self, "language", "zh"))
         self.sidebar.btn_page_understanding.setText(t["nav_understanding"])
         self.sidebar.btn_page_settings.setText(t["nav_settings"])
         self.sidebar.btn_collapse.setToolTip(t.get("nav_sidebar_hide", "隐藏侧边栏 (Ctrl+B)"))
