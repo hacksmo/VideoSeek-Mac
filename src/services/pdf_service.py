@@ -435,3 +435,44 @@ def get_document_library_status(*, config=None) -> dict:
         "pages": int(stats.get("pages") or 0),
         "lance_dir": stats.get("lance_dir") or "",
     }
+
+
+# ---------------------------------------------------------------------------
+# Delete
+# ---------------------------------------------------------------------------
+
+
+def delete_document(pdf_id: str, *, delete_file: bool = False, config=None) -> dict:
+    """Remove a document from the index, optionally moving its source file to trash.
+
+    ``delete_file=False`` only drops the index rows (document + pages); the file
+    stays untouched. ``delete_file=True`` also moves the source file to the OS
+    trash bin. Returns ``{"removed": int, "trashed": bool, "error": str}``.
+    """
+    from src.storage import pdf_lance_store as store
+
+    pdf_id = str(pdf_id or "").strip()
+    if not pdf_id:
+        return {"removed": 0, "trashed": False, "error": "pdf_id is required"}
+
+    path = ""
+    try:
+        for doc in store.iter_documents(config=config, columns=["pdf_id", "pdf_path"]):
+            if str(doc.get("pdf_id") or "") == pdf_id:
+                path = str(doc.get("pdf_path") or "").strip()
+                break
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Failed to resolve PDF path for %s: %s", pdf_id, exc)
+
+    trashed = False
+    error = ""
+    if delete_file:
+        if path and os.path.isfile(path):
+            from src.services.image_index_service import _trash_file
+
+            trashed, error = _trash_file(path)
+        elif not path:
+            error = "源文件路径未知，仅移除索引记录"
+
+    removed = int(store.delete_documents([pdf_id], config=config) or 0)
+    return {"removed": removed, "trashed": trashed, "error": error}

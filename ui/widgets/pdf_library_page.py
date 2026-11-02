@@ -73,6 +73,15 @@ _STRINGS = {
         "open_pdf": "打开 PDF",
         "preview_loading": "正在渲染…",
         "preview_failed": "渲染失败：{error}",
+        "menu_reveal": "在访达中显示",
+        "menu_copy_path": "复制文件路径",
+        "menu_open": "用默认应用打开",
+        "menu_delete_index": "从索引移除",
+        "menu_delete_file": "删除并移入废纸篓",
+        "delete_confirm_title": "删除 PDF",
+        "delete_confirm_body": "将把「{name}」移入废纸篓，并从索引移除。\n\n此操作可从废纸篓找回，确定继续吗？",
+        "delete_done": "已删除 {count} 份文档",
+        "delete_failed": "删除失败：{error}",
     },
     "en": {
         "title": "Documents",
@@ -110,6 +119,15 @@ _STRINGS = {
         "open_pdf": "Open PDF",
         "preview_loading": "Rendering…",
         "preview_failed": "Render failed: {error}",
+        "menu_reveal": "Reveal in Finder",
+        "menu_copy_path": "Copy file path",
+        "menu_open": "Open with default app",
+        "menu_delete_index": "Remove from index",
+        "menu_delete_file": "Delete & move to Trash",
+        "delete_confirm_title": "Delete PDF",
+        "delete_confirm_body": "Move “{name}” to the Trash and remove it from the index.\n\nYou can restore it from the Trash. Continue?",
+        "delete_done": "Deleted {count} document(s)",
+        "delete_failed": "Delete failed: {error}",
     },
 }
 
@@ -163,13 +181,15 @@ class _SearchWorker(QThread):
 
 
 class _RenderWorker(QThread):
-    rendered = Signal(int, int, object)  # page_no, page_count, QPixmap
+    """Render every page of a PDF to QPixmaps (fit-width, one per page)."""
+
+    rendered = Signal(int, list)  # start_page_no, [QPixmap, ...]
     failed = Signal(str)
 
-    def __init__(self, pdf_path: str, page_no: int, *, parent=None):
+    def __init__(self, pdf_path: str, *, start_page: int = 1, parent=None):
         super().__init__(parent)
         self._path = str(pdf_path or "")
-        self._page_no = int(page_no or 1)
+        self._start_page = int(start_page or 1)
 
     def run(self):
         try:
@@ -177,26 +197,27 @@ class _RenderWorker(QThread):
         except ImportError:  # pragma: no cover - older installs
             import fitz as pymupdf  # type: ignore
         try:
-            with pymupdf.open(self._path) as doc:
-                page_count = int(doc.page_count or 0)
-                page_no = max(1, min(self._page_no, page_count or 1))
-                page = doc.load_page(page_no - 1)
-                pix = page.get_pixmap(dpi=120)
-                from PySide6.QtGui import QImage, QPixmap
+            from PySide6.QtGui import QImage, QPixmap
 
-                image = QImage(
-                    pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888
-                )
-                pixmap = QPixmap.fromImage(image.copy())
-                self.rendered.emit(page_no, page_count, pixmap)
+            pixmaps: list = []
+            with pymupdf.open(self._path) as doc:
+                for page in doc:
+                    pix = page.get_pixmap(dpi=110)
+                    image = QImage(
+                        pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888
+                    )
+                    pixmaps.append(QPixmap.fromImage(image.copy()))
+            self.rendered.emit(self._start_page, pixmaps)
         except Exception as exc:  # pragma: no cover - defensive
             self.failed.emit(str(exc))
 
 
 class _PagePreview(QWidget):
-    """Scrollable PDF page preview with prev/next paging."""
+    """Continuous, scrollable PDF preview: every page stacked vertically.
 
-    page_changed = Signal(int)
+    Pages are scaled to fit the preview width; scrolling replaces prev/next
+    buttons. The requested start page is scrolled into view after render.
+    """
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -214,66 +235,84 @@ class _PagePreview(QWidget):
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setObjectName("PdfPreviewScroll")
-        self.image = QLabel()
-        self.image.setObjectName("PdfPreviewImage")
-        self.image.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.image.setMinimumSize(1, 1)
-        self.image.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
-        self.scroll.setWidget(self.image)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        self.canvas = QWidget()
+        self.canvas.setObjectName("PdfPreviewCanvas")
+        self.canvas_layout = QVBoxLayout(self.canvas)
+        self.canvas_layout.setContentsMargins(8, 8, 8, 8)
+        self.canvas_layout.setSpacing(12)
+        self.canvas_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.scroll.setWidget(self.canvas)
         root.addWidget(self.scroll, 1)
 
-        nav = QHBoxLayout()
-        nav.setSpacing(8)
-        self.btn_prev = QPushButton("")
-        set_button_role(self.btn_prev, "GhostButton")
-        self.btn_next = QPushButton("")
-        set_button_role(self.btn_next, "GhostButton")
-        self.btn_open = QPushButton("")
-        set_button_role(self.btn_open, "GhostButton")
-        for button in (self.btn_prev, self.btn_next, self.btn_open):
-            button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.lbl_page = QLabel("")
-        self.lbl_page.setObjectName("Hint")
-        nav.addWidget(self.btn_prev)
-        nav.addWidget(self.lbl_page)
-        nav.addWidget(self.btn_next)
-        nav.addStretch(1)
-        nav.addWidget(self.btn_open)
-        root.addLayout(nav)
+        self._page_labels: list[QLabel] = []
+        self._start_page = 1
+        self._pending_scroll = False
 
-        self.btn_prev.clicked.connect(lambda: self.page_changed.emit(self._page_no - 1))
-        self.btn_next.clicked.connect(lambda: self.page_changed.emit(self._page_no + 1))
+    def _clear(self) -> None:
+        while self.canvas_layout.count():
+            item = self.canvas_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self._page_labels = []
 
-        self._page_no = 1
-        self._page_count = 1
+    def set_pages(self, pixmaps: list, start_page: int) -> None:
+        self._clear()
+        self._start_page = max(1, int(start_page or 1))
+        self._pending_scroll = True
+        if not pixmaps:
+            self.set_placeholder("")
+            return
+        for page_no, pixmap in enumerate(pixmaps, start=1):
+            label = QLabel()
+            label.setObjectName("PdfPreviewPage")
+            label.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+            label.setMinimumWidth(1)
+            label.setPixmap(pixmap)
+            label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+            label.setProperty("pageNo", page_no)
+            self._page_labels.append(label)
+            self.canvas_layout.addWidget(label)
+        self._fit_width()
 
-    def set_pixmap(self, pixmap, page_no: int, page_count: int) -> None:
-        self._page_no = page_no
-        self._page_count = page_count
-        self.image.setPixmap(pixmap)
-        self.image.adjustSize()
-        self._sync_nav()
+    def _fit_width(self) -> None:
+        viewport_w = self.scroll.viewport().width() - 16
+        for label in self._page_labels:
+            pixmap = label.pixmap()
+            if pixmap is None or pixmap.isNull() or viewport_w <= 0:
+                continue
+            scaled = pixmap.scaledToWidth(
+                viewport_w, Qt.TransformationMode.SmoothTransformation
+            )
+            label.setPixmap(scaled)
+        # Scroll to the requested start page after the layout settles.
+        if self._pending_scroll:
+            from PySide6.QtCore import QTimer
+
+            QTimer.singleShot(0, self._scroll_to_start)
+
+    def _scroll_to_start(self) -> None:
+        self._pending_scroll = False
+        target_index = max(0, self._start_page - 1)
+        if target_index < len(self._page_labels):
+            label = self._page_labels[target_index]
+            y = label.mapTo(self.canvas, label.rect().topLeft()).y()
+            self.scroll.verticalScrollBar().setValue(max(0, y - 8))
 
     def set_placeholder(self, text: str) -> None:
-        from PySide6.QtGui import QPixmap
+        self._clear()
+        placeholder = QLabel(text or "")
+        placeholder.setObjectName("Hint")
+        placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        placeholder.setWordWrap(True)
+        self.canvas_layout.addWidget(placeholder)
 
-        self.image.setPixmap(QPixmap())
-        self.image.setText(text)
-        self._page_no = 1
-        self._page_count = 1
-        self.lbl_page.setText("")
-        self.btn_prev.setEnabled(False)
-        self.btn_next.setEnabled(False)
-
-    def _sync_nav(self) -> None:
-        self.image.setText("")
-        self.lbl_page.setText(f"{self._page_no} / {self._page_count}")
-        self.btn_prev.setEnabled(self._page_no > 1)
-        self.btn_next.setEnabled(self._page_no < self._page_count)
-
-    @property
-    def current_page(self) -> int:
-        return self._page_no
+    def resizeEvent(self, event):  # noqa: N802 - Qt API
+        super().resizeEvent(event)
+        if self._page_labels:
+            self._fit_width()
 
 
 class _ResultDelegate(QStyledItemDelegate):
@@ -524,13 +563,11 @@ class PdfLibraryPage(PageScaffold):
         self.results_list.setUniformItemSizes(False)
         self.results_list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
 
-        # 右侧 PDF 页预览（可翻页）。
+        # 右侧 PDF 连续预览：所有页竖排，滚动即翻页。
         self.preview = _PagePreview()
         self.preview.lbl_title.setText(self._t["preview_title"])
         self.preview.set_placeholder(self._t["detail_empty"])
         self.preview.setMinimumWidth(320)
-        self.preview.page_changed.connect(self._on_preview_page_changed)
-        self.preview.btn_open.clicked.connect(self._on_open_current_pdf)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setObjectName("PdfResultsSplitter")
@@ -556,6 +593,8 @@ class PdfLibraryPage(PageScaffold):
         self.roots_list.currentRowChanged.connect(self._on_root_selected)
         self.results_list.itemDoubleClicked.connect(self._on_result_activated)
         self.results_list.currentItemChanged.connect(self._on_current_changed)
+        self.results_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.results_list.customContextMenuRequested.connect(self._on_result_menu)
 
     # -- language -------------------------------------------------------
     def apply_texts(self, language: str = "") -> None:
@@ -574,9 +613,6 @@ class PdfLibraryPage(PageScaffold):
         self.btn_search.setText(t["search"])
         self.search_input.setPlaceholderText(t["search_placeholder"])
         self.preview.lbl_title.setText(t["preview_title"])
-        self.preview.btn_prev.setText(t["prev_page"])
-        self.preview.btn_next.setText(t["next_page"])
-        self.preview.btn_open.setText(t["open_pdf"])
         if not self._roots:
             self.roots_hint.setText(t["roots_empty"])
 
@@ -776,34 +812,22 @@ class PdfLibraryPage(PageScaffold):
         else:
             self.preview.set_placeholder(self._t["detail_empty"])
 
-    def _on_preview_page_changed(self, page_no: int) -> None:
-        if self._current_pdf_path:
-            self._render_preview(page_no)
-
-    def _render_preview(self, page_no: int) -> None:
+    def _render_preview(self, start_page: int) -> None:
         if not self._current_pdf_path:
             return
         if self._render_worker is not None and self._render_worker.isRunning():
             self._render_worker.requestInterruption()
-        self.preview.image.setText(self._t["preview_loading"])
-        worker = _RenderWorker(self._current_pdf_path, page_no, parent=self)
+        worker = _RenderWorker(self._current_pdf_path, start_page=start_page, parent=self)
         worker.rendered.connect(self._on_rendered)
         worker.failed.connect(self._on_render_failed)
         self._render_worker = worker
         worker.start()
 
-    def _on_rendered(self, page_no: int, page_count: int, pixmap) -> None:
-        self.preview.set_pixmap(pixmap, page_no, page_count)
-        self.preview.btn_prev.setText(self._t["prev_page"])
-        self.preview.btn_next.setText(self._t["next_page"])
-        self.preview.btn_open.setText(self._t["open_pdf"])
+    def _on_rendered(self, start_page: int, pixmaps: list) -> None:
+        self.preview.set_pages(pixmaps, start_page)
 
     def _on_render_failed(self, message: str) -> None:
         self.preview.set_placeholder(self._t["preview_failed"].format(error=message))
-
-    def _on_open_current_pdf(self) -> None:
-        if self._current_pdf_path:
-            self._open_pdf({"pdf_path": self._current_pdf_path})
 
     @staticmethod
     def _open_pdf(hit: dict) -> None:
@@ -813,6 +837,77 @@ class PdfLibraryPage(PageScaffold):
         path = str(hit.get("pdf_path") or "")
         if path and os.path.isfile(path):
             QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+    # -- context menu ---------------------------------------------------
+    def _on_result_menu(self, pos) -> None:
+        from PySide6.QtGui import QAction
+        from PySide6.QtWidgets import QMenu
+
+        item = self.results_list.itemAt(pos)
+        if item is None:
+            return
+        hit = item.data(Qt.ItemDataRole.UserRole) or {}
+        pdf_id = str(hit.get("pdf_id") or "")
+        path = str(hit.get("pdf_path") or "")
+
+        menu = QMenu(self.results_list)
+        act_reveal = QAction(self._t["menu_reveal"], menu)
+        act_copy = QAction(self._t["menu_copy_path"], menu)
+        act_open = QAction(self._t["menu_open"], menu)
+        menu.addAction(act_open)
+        menu.addAction(act_reveal)
+        menu.addAction(act_copy)
+        menu.addSeparator()
+        act_delete_index = QAction(self._t["menu_delete_index"], menu)
+        act_delete_file = QAction(self._t["menu_delete_file"], menu)
+        menu.addAction(act_delete_index)
+        menu.addAction(act_delete_file)
+
+        chosen = menu.exec(self.results_list.viewport().mapToGlobal(pos))
+        if chosen is None:
+            return
+
+        if chosen is act_open:
+            self._open_pdf(hit)
+        elif chosen is act_reveal:
+            from ui import file_actions
+
+            file_actions.reveal_in_file_manager([path])
+        elif chosen is act_copy:
+            from ui import file_actions
+
+            file_actions.copy_paths_to_clipboard([path])
+        elif chosen is act_delete_index:
+            if pdf_id:
+                self._delete_documents([pdf_id], delete_file=False)
+        elif chosen is act_delete_file:
+            if pdf_id:
+                name = os.path.basename(path) if path else pdf_id
+                self._confirm_delete_files([pdf_id], name)
+
+    def _confirm_delete_files(self, pdf_ids: list, name: str) -> None:
+        answer = QMessageBox.question(
+            self,
+            self._t["delete_confirm_title"],
+            self._t["delete_confirm_body"].format(name=name),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self._delete_documents(pdf_ids, delete_file=True)
+
+    def _delete_documents(self, pdf_ids: list, *, delete_file: bool) -> None:
+        from src.services import pdf_service as service
+
+        try:
+            removed = 0
+            for pdf_id in pdf_ids:
+                result = service.delete_document(pdf_id, delete_file=delete_file)
+                removed += int(result.get("removed") or 0)
+            self.lbl_search_status.setText(self._t["delete_done"].format(count=removed))
+            self._refresh_status()
+        except Exception as exc:  # pragma: no cover - defensive
+            self.lbl_search_status.setText(self._t["delete_failed"].format(error=exc))
 
     # -- status / lifecycle --------------------------------------------
     def _refresh_status(self) -> None:
