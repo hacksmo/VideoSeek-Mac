@@ -202,7 +202,7 @@ class _RenderWorker(QThread):
             pixmaps: list = []
             with pymupdf.open(self._path) as doc:
                 for page in doc:
-                    pix = page.get_pixmap(dpi=110)
+                    pix = page.get_pixmap(dpi=160)
                     image = QImage(
                         pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888
                     )
