@@ -266,6 +266,14 @@ class TrayGuiMixin:
                 from src.app.logging_utils import note_swallowed
 
                 note_swallowed(exc, "ui/windows/gui_tray.py:images_page_shutdown")
+        documents_page = getattr(self, "documents_page", None)
+        if documents_page is not None:
+            try:
+                documents_page.shutdown()
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui_tray.py:documents_page_shutdown")
         self.mobile_bridge_controller.shutdown()
         if hasattr(self, "team_mode_controller"):
             self.team_mode_controller.shutdown()

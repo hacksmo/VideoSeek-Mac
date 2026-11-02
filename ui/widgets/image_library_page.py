@@ -1764,8 +1764,6 @@ class ImageLibraryPage(PageScaffold):
 
     def _delete_image_ids(self, image_ids: list[str], *, delete_file: bool) -> None:
         """Delete index rows (and optionally trash files) off the UI thread."""
-        from src.services import image_index_service as service
-
         worker = _DeleteWorker(image_ids, delete_file=delete_file, parent=self)
         worker.done.connect(self._on_delete_finished)
         worker.failed.connect(self._on_delete_failed)
@@ -1890,7 +1888,13 @@ class ImageLibraryPage(PageScaffold):
         self._auto_check_new()
 
     def shutdown(self) -> None:
-        """Stop background work before the page (or the app) goes away."""
+        """Stop background work before the page (or the app) goes away.
+
+        Workers without a ``stop()`` method (status / search) block inside a
+        Lance read that cannot be interrupted; if they do not finish in time we
+        ``terminate()`` them rather than let Qt destroy a still-running
+        ``QThread`` (which aborts the process at exit).
+        """
         self._thumb_pump.stop()
         deadline = time.time() + 4.0
         for name in (
@@ -1909,8 +1913,14 @@ class ImageLibraryPage(PageScaffold):
                 stop = getattr(worker, "stop", None)
                 if callable(stop):
                     stop()
+                else:
+                    worker.requestInterruption()
                 remaining = max(0, int((deadline - time.time()) * 1000))
-                worker.wait(remaining)
+                if not worker.wait(remaining):
+                    # Still running: force-terminate to avoid a fatal
+                    # "QThread destroyed while running" abort on exit.
+                    worker.terminate()
+                    worker.wait(1000)
             setattr(self, name, None)
         if self._thumb_loader is not None:
             try:

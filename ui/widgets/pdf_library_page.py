@@ -940,5 +940,9 @@ class PdfLibraryPage(PageScaffold):
                     stop()
                 else:
                     worker.requestInterruption()
-                worker.wait(3000)
+                if not worker.wait(3000):
+                    # Still running: force-terminate to avoid a fatal
+                    # "QThread destroyed while running" abort on exit.
+                    worker.terminate()
+                    worker.wait(1000)
             setattr(self, name, None)

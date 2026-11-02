@@ -79,3 +79,7 @@ article.md
 server/nginx/conf/conf.d/videos.conf
 server/nginx/logs/
 server/nginx/temp/
+
+# 本地商业谈判草稿（含微信号等隐私，勿提交/推送）
+docs/upstream-issue-draft.md
+docs/license-inquiry-email-draft.md
