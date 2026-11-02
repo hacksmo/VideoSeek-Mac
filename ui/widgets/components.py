@@ -334,13 +334,13 @@ class NavigationSidebar(QWidget):
         self.runtime_hint.hide()
         layout.addWidget(self.runtime_hint)
 
-        # 图片库「照片目录」面板槽位：由主窗口在切到图片库页面时挂载/显示。
-        self.library_panel_host = QWidget()
+        # 页签专属控制面板槽位（图片库「照片目录」、文档库「PDF 目录」等）：
+        # 由主窗口按页签挂载，切页时只显示当前页签对应的那个面板。
+        from PySide6.QtWidgets import QStackedWidget
+
+        self.library_panel_host = QStackedWidget()
         self.library_panel_host.setObjectName("SidebarLibraryPanelHost")
-        self.library_panel_layout = QVBoxLayout(self.library_panel_host)
-        self.library_panel_layout.setContentsMargins(0, 0, 0, 0)
-        self.library_panel_layout.setSpacing(8)
-        self._library_panel = None
+        self._library_panels: dict[str, QWidget] = {}
         self.library_panel_host.hide()
         layout.addWidget(self.library_panel_host)
 
@@ -417,23 +417,33 @@ class NavigationSidebar(QWidget):
         button.setFixedHeight(COMPONENT_SIZES["nav_button_height"])
         return button
 
-    def attach_library_panel(self, widget) -> None:
-        """Host the image library's「照片目录」panel inside the sidebar.
+    def attach_library_panel(self, widget, page_id: str = "images") -> None:
+        """Host a page's control panel inside the sidebar.
 
-        The panel widget is reparented into ``library_panel_host``; its signal
-        connections are unaffected. Call :meth:`set_library_panel_visible` to
-        show it only while the image-library page is active.
+        ``page_id`` ties the panel to a nav page (e.g. ``images`` / ``documents``).
+        The panel is reparented into ``library_panel_host``; its signal connections
+        are unaffected. Call :meth:`set_active_panel` to show only the active page's
+        panel.
         """
-        if widget is self._library_panel:
+        page_id = str(page_id or "").strip() or "images"
+        if self._library_panels.get(page_id) is widget:
             return
-        self._library_panel = widget
+        self._library_panels[page_id] = widget
         if widget is not None:
-            widget.setParent(self.library_panel_host)
-            self.library_panel_layout.addWidget(widget)
+            self.library_panel_host.addWidget(widget)
 
+    def set_active_panel(self, page_id: str | None) -> None:
+        """Show only the panel belonging to ``page_id`` (or none)."""
+        panels = self._library_panels
+        target = panels.get(str(page_id or "").strip()) if page_id else None
+        has_panels = any(panels.values())
+        self.library_panel_host.setVisible(target is not None and has_panels)
+        if target is not None:
+            self.library_panel_host.setCurrentWidget(target)
+
+    # Back-compat alias used by older call sites.
     def set_library_panel_visible(self, visible: bool) -> None:
-        """Show/hide the hosted image-library panel (and the host row)."""
-        self.library_panel_host.setVisible(bool(visible) and self._library_panel is not None)
+        self.set_active_panel("images" if visible else None)
 
     def register_nav_page(self, page_id: str, label: str, *, insert_after: str = "understanding"):
         """Insert an optional nav button after ``insert_after`` (plugin pages)."""

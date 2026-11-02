@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSizePolicy,
+    QWidget,
 )
 
 from ui.widgets.button_roles import set_button_role
@@ -160,37 +161,47 @@ class PdfLibraryPage(PageScaffold):
         self.header.subtitle.setText(self._t["subtitle"])
         self.header.subtitle.hide()
 
-        self._build_library_card()
+        # 「PDF 目录」控制面板：交给主窗口挂到左侧全局侧边栏（与图片库一致）。
+        # 页面主体只保留检索 + 结果列表。
+        self.library_card = self._build_library_card()
+        self.library_card.setMinimumWidth(0)
+        self.library_card.setMaximumWidth(16777215)
+        self.library_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+
         self._build_search_card()
         self._decorate()
 
     # -- construction ---------------------------------------------------
-    def _build_library_card(self) -> None:
-        card = VSCard("panel", margins=(16, 14, 16, 14), spacing=10)
-        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+    def _build_library_card(self) -> QWidget:
+        # 窄侧栏：卡片高度自适应内容，宽度由侧边栏决定。
+        card = VSCard("panel", margins=(14, 12, 14, 12), spacing=10)
+        card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         column = card.content_layout
 
         title = QLabel(self._t["library_card"])
         title.setObjectName("SectionTitle")
         column.addWidget(title)
 
-        actions = QHBoxLayout()
-        actions.setSpacing(8)
+        # 添加文件夹占整行，移除 / 打开目录 并排。
         self.btn_add_root = QPushButton(self._t["add_root"])
         set_button_role(self.btn_add_root, "PrimaryButton")
+        self.btn_add_root.setCursor(Qt.CursorShape.PointingHandCursor)
+        column.addWidget(self.btn_add_root)
+
+        root_actions = QHBoxLayout()
+        root_actions.setSpacing(8)
         self.btn_remove_root = QPushButton(self._t["remove_root"])
         set_button_role(self.btn_remove_root, "GhostButton")
         self.btn_open_root = QPushButton(self._t["open_root"])
         set_button_role(self.btn_open_root, "GhostButton")
-        for button in (self.btn_add_root, self.btn_remove_root, self.btn_open_root):
+        for button in (self.btn_remove_root, self.btn_open_root):
             button.setCursor(Qt.CursorShape.PointingHandCursor)
-            actions.addWidget(button)
-        actions.addStretch(1)
-        column.addLayout(actions)
+            root_actions.addWidget(button)
+        column.addLayout(root_actions)
 
         self.roots_list = QListWidget()
         self.roots_list.setObjectName("PdfRootsList")
-        self.roots_list.setFixedHeight(74)
+        self.roots_list.setMinimumHeight(96)
         self.roots_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         column.addWidget(self.roots_list)
 
@@ -199,6 +210,7 @@ class PdfLibraryPage(PageScaffold):
         self.roots_hint.setWordWrap(True)
         column.addWidget(self.roots_hint)
 
+        # 重新扫描 / 开始索引 / 停止。
         index_row = QHBoxLayout()
         index_row.setSpacing(8)
         self.btn_rescan = QPushButton(self._t["rescan"])
@@ -211,7 +223,6 @@ class PdfLibraryPage(PageScaffold):
         for button in (self.btn_rescan, self.btn_index, self.btn_stop):
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             index_row.addWidget(button)
-        index_row.addStretch(1)
         column.addLayout(index_row)
 
         self.lbl_status = QLabel(self._t["status_idle"])
@@ -219,7 +230,8 @@ class PdfLibraryPage(PageScaffold):
         self.lbl_status.setWordWrap(True)
         column.addWidget(self.lbl_status)
 
-        self.content_layout.addWidget(card)
+        column.addStretch(1)
+        return card
 
     def _build_search_card(self) -> None:
         card = VSCard("panel", margins=(16, 14, 16, 14), spacing=10)

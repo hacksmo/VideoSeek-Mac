@@ -370,10 +370,13 @@ class MainWindow(
         self.unified_page.video_activated.connect(self._on_unified_video_activated)
         main_layout.addWidget(self.content, 1)
 
-        # 图片库的「照片目录」控制面板挂到左侧全局侧边栏，页面右侧全给检索+图片。
+        # 图片库「照片目录」、文档库「PDF 目录」控制面板挂到左侧全局侧边栏，
+        # 页面右侧全给检索 + 结果。切页时只显示当前页签对应的面板。
         if hasattr(self.images_page, "library_card"):
-            self.sidebar.attach_library_panel(self.images_page.library_card)
-            self.sidebar.set_library_panel_visible(False)
+            self.sidebar.attach_library_panel(self.images_page.library_card, page_id="images")
+        if hasattr(self.documents_page, "library_card"):
+            self.sidebar.attach_library_panel(self.documents_page.library_card, page_id="documents")
+        self.sidebar.set_active_panel(None)
 
         self.search_page.preview_placeholder.setMinimumHeight(0)
         self.search_page.preview_placeholder.setSizePolicy(
@@ -1080,8 +1083,11 @@ class MainWindow(
             self._settle_understanding_page_layout()
         if page_name == "link":
             self._settle_link_page_layout()
-        # 图片库的「照片目录」面板只在图片库页面显示。
-        self.sidebar.set_library_panel_visible(page_name == "images")
+        # 页签专属控制面板（图片库「照片目录」/ 文档库「PDF 目录」）只在对应页显示。
+        if page_name in ("images", "documents"):
+            self.sidebar.set_active_panel(page_name)
+        else:
+            self.sidebar.set_active_panel(None)
         for feature in get_registry().features:
             feature.on_page_shown(self, page_name)
 
