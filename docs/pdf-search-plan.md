@@ -2,7 +2,7 @@
 
 > 目标：让 VideoSeek 能索引并检索 PDF（内含图片或文字）。
 > 定位：**「文档库」作为独立的一类库，与「图片库」「视频库」三者平级、分开存放**，逻辑更清晰。
-> 状态：方案设计（未实现）。
+> 状态：**Phase 1（文字型 PDF 检索）已实现**，Phase 2/3 待实现。
 
 ---
 
@@ -132,13 +132,20 @@ ui/widgets/
 
 ## 8. 落地顺序（三个阶段）
 
-### Phase 1 — MVP：文字型 PDF 检索（改动最小）
+### Phase 1 — MVP：文字型 PDF 检索（改动最小）✅ 已实现
 
 - 依赖加 `pymupdf`
 - `pdf_lance_store` + `pdf_service`：`add root → scan → 抽文本按页存 → 字面扫描检索`
-- 检索复用现有中文三级路由的字面扫描（`query_terms` / `_literal_scan`）
+- 检索复用现有中文三级路由的字面扫描（`query_terms` / `_literal_scan` 同款分片）
 - 命中返回 `{pdf_path, page_no, snippet}`，定位到页
-- 产出：能搜文字型 PDF 的 CLI + 最小验证
+- 产出：`scripts/pdf_index.py`（add/scan/index/search/status）+ 测试
+
+**已落地的文件：**
+- `src/media/formats.py` — `is_supported_pdf_path` / `PDF_EXTS`
+- `src/storage/pdf_lance_store.py` — `pdf_documents` / `pdf_pages` 两张表
+- `src/services/pdf_service.py` — manifest、扫描、抽文本、索引、字面搜索
+- `scripts/pdf_index.py` — CLI
+- `tests/test_pdf_library.py` + `tests/test_pdf_index_search.py`
 
 ### Phase 2 — 图文混合检索
 

@@ -24,6 +24,9 @@ python-vlc
 # Hard-subtitle OCR (ONNX); VAD uses bundled Silero under resources/asr/
 rapidocr-onnxruntime==1.4.4
 
+# PDF document library: text extraction + page rendering (Phase 1 uses text only)
+pymupdf>=1.24.0
+
 # Mobile bridge (local HTTP server / phone upload) — see src/web/mobile_bridge.py
 fastapi==0.136.0
 uvicorn==0.44.0

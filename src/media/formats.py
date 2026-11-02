@@ -74,3 +74,19 @@ def is_supported_image_path(path: str | os.PathLike[str]) -> bool:
 def is_supported_media_path(path: str | os.PathLike[str]) -> bool:
     """True for a video container OR a still image the app can index."""
     return is_supported_video_path(path) or is_supported_image_path(path)
+
+
+# ---------------------------------------------------------------------------
+# Documents (PDF library)
+#
+# PDFs are a third, peer library type (alongside video and image). They are
+# indexed into their own tables (``pdf_documents`` / ``pdf_pages``) and never
+# mixed into ``image_assets``, so a broken PDF index cannot touch either the
+# video or image pipeline.
+# ---------------------------------------------------------------------------
+PDF_EXTS = (".pdf",)
+
+
+def is_supported_pdf_path(path: str | os.PathLike[str]) -> bool:
+    name = os.fspath(path).lower()
+    return name.endswith(PDF_EXTS)
