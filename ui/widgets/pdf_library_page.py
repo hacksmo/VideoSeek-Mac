@@ -13,7 +13,8 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import QRect, QSize, Qt, QThread, Signal
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFileDialog,
@@ -25,6 +26,10 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSizePolicy,
+    QSplitter,
+    QStyle,
+    QStyledItemDelegate,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -60,7 +65,14 @@ _STRINGS = {
         "no_files": "没有发现可索引的 PDF。",
         "confirm_big_title": "索引量大",
         "confirm_big_body": "本次将处理 {count} 份 PDF。继续吗？",
-        "detail_empty": "选中一条结果查看命中位置",
+        "detail_empty": "选中一条结果，右侧查看该页预览",
+        "preview_title": "页面预览",
+        "prev_page": "上一页",
+        "next_page": "下一页",
+        "page_label": "第 {page} / {total} 页",
+        "open_pdf": "打开 PDF",
+        "preview_loading": "正在渲染…",
+        "preview_failed": "渲染失败：{error}",
     },
     "en": {
         "title": "Documents",
@@ -90,7 +102,14 @@ _STRINGS = {
         "no_files": "No indexable PDFs found.",
         "confirm_big_title": "Large batch",
         "confirm_big_body": "About to index {count} PDFs. Continue?",
-        "detail_empty": "Select a result to see where it matched",
+        "detail_empty": "Select a result to preview that page on the right",
+        "preview_title": "Page preview",
+        "prev_page": "Previous",
+        "next_page": "Next",
+        "page_label": "Page {page} / {total}",
+        "open_pdf": "Open PDF",
+        "preview_loading": "Rendering…",
+        "preview_failed": "Render failed: {error}",
     },
 }
 
@@ -143,6 +162,240 @@ class _SearchWorker(QThread):
             self.failed.emit(str(exc))
 
 
+class _RenderWorker(QThread):
+    rendered = Signal(int, int, object)  # page_no, page_count, QPixmap
+    failed = Signal(str)
+
+    def __init__(self, pdf_path: str, page_no: int, *, parent=None):
+        super().__init__(parent)
+        self._path = str(pdf_path or "")
+        self._page_no = int(page_no or 1)
+
+    def run(self):
+        try:
+            import pymupdf
+        except ImportError:  # pragma: no cover - older installs
+            import fitz as pymupdf  # type: ignore
+        try:
+            with pymupdf.open(self._path) as doc:
+                page_count = int(doc.page_count or 0)
+                page_no = max(1, min(self._page_no, page_count or 1))
+                page = doc.load_page(page_no - 1)
+                pix = page.get_pixmap(dpi=120)
+                from PySide6.QtGui import QImage, QPixmap
+
+                image = QImage(
+                    pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888
+                )
+                pixmap = QPixmap.fromImage(image.copy())
+                self.rendered.emit(page_no, page_count, pixmap)
+        except Exception as exc:  # pragma: no cover - defensive
+            self.failed.emit(str(exc))
+
+
+class _PagePreview(QWidget):
+    """Scrollable PDF page preview with prev/next paging."""
+
+    page_changed = Signal(int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        from PySide6.QtWidgets import QScrollArea
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(8)
+
+        title = QLabel("")
+        title.setObjectName("SectionTitle")
+        self.lbl_title = title
+        root.addWidget(title)
+
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setObjectName("PdfPreviewScroll")
+        self.image = QLabel()
+        self.image.setObjectName("PdfPreviewImage")
+        self.image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image.setMinimumSize(1, 1)
+        self.image.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        self.scroll.setWidget(self.image)
+        root.addWidget(self.scroll, 1)
+
+        nav = QHBoxLayout()
+        nav.setSpacing(8)
+        self.btn_prev = QPushButton("")
+        set_button_role(self.btn_prev, "GhostButton")
+        self.btn_next = QPushButton("")
+        set_button_role(self.btn_next, "GhostButton")
+        self.btn_open = QPushButton("")
+        set_button_role(self.btn_open, "GhostButton")
+        for button in (self.btn_prev, self.btn_next, self.btn_open):
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.lbl_page = QLabel("")
+        self.lbl_page.setObjectName("Hint")
+        nav.addWidget(self.btn_prev)
+        nav.addWidget(self.lbl_page)
+        nav.addWidget(self.btn_next)
+        nav.addStretch(1)
+        nav.addWidget(self.btn_open)
+        root.addLayout(nav)
+
+        self.btn_prev.clicked.connect(lambda: self.page_changed.emit(self._page_no - 1))
+        self.btn_next.clicked.connect(lambda: self.page_changed.emit(self._page_no + 1))
+
+        self._page_no = 1
+        self._page_count = 1
+
+    def set_pixmap(self, pixmap, page_no: int, page_count: int) -> None:
+        self._page_no = page_no
+        self._page_count = page_count
+        self.image.setPixmap(pixmap)
+        self.image.adjustSize()
+        self._sync_nav()
+
+    def set_placeholder(self, text: str) -> None:
+        from PySide6.QtGui import QPixmap
+
+        self.image.setPixmap(QPixmap())
+        self.image.setText(text)
+        self._page_no = 1
+        self._page_count = 1
+        self.lbl_page.setText("")
+        self.btn_prev.setEnabled(False)
+        self.btn_next.setEnabled(False)
+
+    def _sync_nav(self) -> None:
+        self.image.setText("")
+        self.lbl_page.setText(f"{self._page_no} / {self._page_count}")
+        self.btn_prev.setEnabled(self._page_no > 1)
+        self.btn_next.setEnabled(self._page_no < self._page_count)
+
+    @property
+    def current_page(self) -> int:
+        return self._page_no
+
+
+class _ResultDelegate(QStyledItemDelegate):
+    """Card-style hit: filename + page badge on top, snippet below, with padding.
+
+    Replaces the default flat text so hits no longer run together. Colors come
+    from the theme token map (the app paints with QSS, so the raw palette stays
+    light even in dark mode).
+    """
+
+    PADDING = 12
+    MARGIN = 3
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._colors: dict = {}
+        self._dark: bool | None = None
+
+    def _theme(self) -> dict:
+        from PySide6.QtWidgets import QApplication
+
+        from ui.widgets.styles import theme_color_map
+
+        app = QApplication.instance()
+        dark = bool(app.property("videoseek_is_dark")) if app is not None else True
+        if self._dark is not dark or not self._colors:
+            self._colors = theme_color_map(dark)
+            self._dark = dark
+        return self._colors
+
+    def sizeHint(self, option, index):  # noqa: N802 - Qt API
+        hit = index.data(Qt.ItemDataRole.UserRole) or {}
+        snippet = str(hit.get("snippet") or "").strip()
+        text = snippet if snippet else str(hit.get("rel_path") or hit.get("pdf_path") or "")
+        width = option.rect.width() - self.PADDING * 2
+        metrics = option.fontMetrics
+        # Estimate wrapped line count for the snippet at the delegate's font size.
+        chars_per_line = max(20, width // max(6, metrics.horizontalAdvance("中")))
+        lines = max(1, (len(text) + chars_per_line - 1) // chars_per_line)
+        lines = min(lines, 4)  # cap tall snippets; they elide
+        height = 22 + 6 + lines * (metrics.height() + 3) + self.PADDING * 2
+        return QSize(option.rect.width(), height)
+
+    def paint(self, painter: QPainter, option, index):  # noqa: N802 - Qt API
+        hit = index.data(Qt.ItemDataRole.UserRole) or {}
+        colors = self._theme()
+        rect = option.rect.adjusted(self.MARGIN, self.MARGIN, -self.MARGIN, -self.MARGIN)
+        selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        # Card background.
+        base = QColor(str(colors.get("PANEL") or "#2e2e2e"))
+        if selected:
+            base = QColor(str(colors.get("ACCENT_SOFT") or "#1e3a5f"))
+        elif hovered:
+            base = base.lighter(112) if base.lightness() < 128 else base.darker(104)
+        radius = 8.0
+        path = QPainterPath()
+        path.addRoundedRect(rect.toRectF(), radius, radius)
+        painter.fillPath(path, base)
+
+        if selected:
+            pen = QPen(QColor(str(colors.get("ACCENT") or "#60a5fa")))
+            pen.setWidth(1.5)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawPath(path)
+
+        text_color = QColor(str(colors.get("TEXT") or "#e5e5e5"))
+        muted = QColor(str(colors.get("MUTED") or "#a3a3a3"))
+        accent = QColor(str(colors.get("ACCENT") or "#60a5fa"))
+
+        inner = rect.adjusted(self.PADDING, self.PADDING, -self.PADDING, -self.PADDING)
+
+        # Title line: file name + page badge.
+        name = str(hit.get("rel_path") or hit.get("pdf_path") or "")
+        name = os.path.basename(name) if name else ""
+        page = int(hit.get("page_no") or 1)
+        score = float(hit.get("score") or 0.0)
+        title_font = painter.font()
+        title_font.setBold(True)
+        painter.setFont(title_font)
+        painter.setPen(text_color)
+        title_rect = QRect(inner.left(), inner.top(), inner.width() - 70, 20)
+        metrics = painter.fontMetrics()
+        title_text = metrics.elidedText(name or "(未命名)", Qt.TextElideMode.ElideRight, title_rect.width())
+        painter.drawText(title_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, title_text)
+
+        # Page badge (right side of title line).
+        badge_text = f"P{page}"
+        badge_font = painter.font()
+        badge_font.setBold(False)
+        badge_font.setPointSizeF(max(7.5, badge_font.pointSizeF() - 1))
+        painter.setFont(badge_font)
+        painter.setPen(accent)
+        badge_rect = QRect(inner.right() - 60, inner.top(), 60, 20)
+        painter.drawText(badge_rect, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, badge_text)
+
+        # Score + snippet below.
+        snippet = str(hit.get("snippet") or "").strip()
+        body_font = painter.font()
+        body_font.setBold(False)
+        body_font.setPointSizeF(max(9.0, body_font.pointSizeF()))
+        painter.setFont(body_font)
+        body_rect = QRect(inner.left(), inner.top() + 26, inner.width(), inner.height() - 26)
+        if snippet:
+            painter.setPen(muted)
+            painter.drawText(
+                body_rect,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
+                f"{score:.2f}  {snippet}",
+            )
+        else:
+            painter.setPen(muted)
+            painter.drawText(body_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, f"{score:.2f}")
+
+        painter.restore()
+
+
 class PdfLibraryPage(PageScaffold):
     """Document (PDF) library: folders on top, search + hits below."""
 
@@ -155,7 +408,10 @@ class PdfLibraryPage(PageScaffold):
         self._scan_files: list[str] = []
         self._index_worker = None
         self._search_worker = None
+        self._render_worker = None
         self._index_after_scan = False
+        self._current_pdf_path = ""
+        self._current_page_no = 1
 
         self.header.title.setText(self._t["title"])
         self.header.subtitle.setText(self._t["subtitle"])
@@ -259,10 +515,32 @@ class PdfLibraryPage(PageScaffold):
         self.lbl_search_status.setWordWrap(True)
         column.addWidget(self.lbl_search_status)
 
+        # 结果列表：卡片式 delegate，每条有清晰分隔。
         self.results_list = QListWidget()
         self.results_list.setObjectName("PdfResultsList")
         self.results_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        column.addWidget(self.results_list, 1)
+        self.results_list.setItemDelegate(_ResultDelegate(self.results_list))
+        self.results_list.setSpacing(6)
+        self.results_list.setUniformItemSizes(False)
+        self.results_list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+
+        # 右侧 PDF 页预览（可翻页）。
+        self.preview = _PagePreview()
+        self.preview.lbl_title.setText(self._t["preview_title"])
+        self.preview.set_placeholder(self._t["detail_empty"])
+        self.preview.setMinimumWidth(320)
+        self.preview.page_changed.connect(self._on_preview_page_changed)
+        self.preview.btn_open.clicked.connect(self._on_open_current_pdf)
+
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setObjectName("PdfResultsSplitter")
+        splitter.addWidget(self.results_list)
+        splitter.addWidget(self.preview)
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 2)
+        splitter.setSizes([600, 400])
+        splitter.setChildrenCollapsible(False)
+        column.addWidget(splitter, 1)
 
         self.content_layout.addWidget(card, 1)
 
@@ -277,6 +555,7 @@ class PdfLibraryPage(PageScaffold):
         self.search_input.returnPressed.connect(self._on_search_clicked)
         self.roots_list.currentRowChanged.connect(self._on_root_selected)
         self.results_list.itemDoubleClicked.connect(self._on_result_activated)
+        self.results_list.currentItemChanged.connect(self._on_current_changed)
 
     # -- language -------------------------------------------------------
     def apply_texts(self, language: str = "") -> None:
@@ -294,6 +573,10 @@ class PdfLibraryPage(PageScaffold):
         self.btn_stop.setText(t["stop"])
         self.btn_search.setText(t["search"])
         self.search_input.setPlaceholderText(t["search_placeholder"])
+        self.preview.lbl_title.setText(t["preview_title"])
+        self.preview.btn_prev.setText(t["prev_page"])
+        self.preview.btn_next.setText(t["next_page"])
+        self.preview.btn_open.setText(t["open_pdf"])
         if not self._roots:
             self.roots_hint.setText(t["roots_empty"])
 
@@ -461,29 +744,72 @@ class PdfLibraryPage(PageScaffold):
         self.btn_search.setEnabled(True)
         self.results_list.clear()
         for hit in hits:
-            path = str(hit.get("rel_path") or hit.get("pdf_path") or "")
-            page = int(hit.get("page_no") or 1)
-            snippet = str(hit.get("snippet") or "").strip()
-            label = f"[{hit.get('score', 0):.2f}] {path} · 第 {page} 页"
-            if snippet:
-                label = f"{label}\n    {snippet}"
-            item = QListWidgetItem(label)
+            item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, hit)
-            item.setToolTip(snippet or path)
+            path = str(hit.get("rel_path") or hit.get("pdf_path") or "")
+            item.setToolTip(str(hit.get("snippet") or path))
             self.results_list.addItem(item)
         self.lbl_search_status.setText(self._t["results_n"].format(count=len(hits)))
         if not hits:
             self.lbl_search_status.setText(self._t["results_empty"])
+            self.preview.set_placeholder(self._t["detail_empty"])
+        else:
+            self.results_list.setCurrentRow(0)
 
     def _on_search_failed(self, message: str) -> None:
         self.btn_search.setEnabled(True)
         self.lbl_search_status.setText(self._t["search_failed"].format(error=message))
 
     def _on_result_activated(self, item: QListWidgetItem) -> None:
+        self._open_pdf(item.data(Qt.ItemDataRole.UserRole) or {})
+
+    def _on_current_changed(self, current, _previous) -> None:
+        if current is None:
+            self.preview.set_placeholder(self._t["detail_empty"])
+            return
+        hit = current.data(Qt.ItemDataRole.UserRole) or {}
+        path = str(hit.get("pdf_path") or "")
+        page = int(hit.get("page_no") or 1)
+        if path:
+            self._current_pdf_path = path
+            self._render_preview(page)
+        else:
+            self.preview.set_placeholder(self._t["detail_empty"])
+
+    def _on_preview_page_changed(self, page_no: int) -> None:
+        if self._current_pdf_path:
+            self._render_preview(page_no)
+
+    def _render_preview(self, page_no: int) -> None:
+        if not self._current_pdf_path:
+            return
+        if self._render_worker is not None and self._render_worker.isRunning():
+            self._render_worker.requestInterruption()
+        self.preview.image.setText(self._t["preview_loading"])
+        worker = _RenderWorker(self._current_pdf_path, page_no, parent=self)
+        worker.rendered.connect(self._on_rendered)
+        worker.failed.connect(self._on_render_failed)
+        self._render_worker = worker
+        worker.start()
+
+    def _on_rendered(self, page_no: int, page_count: int, pixmap) -> None:
+        self.preview.set_pixmap(pixmap, page_no, page_count)
+        self.preview.btn_prev.setText(self._t["prev_page"])
+        self.preview.btn_next.setText(self._t["next_page"])
+        self.preview.btn_open.setText(self._t["open_pdf"])
+
+    def _on_render_failed(self, message: str) -> None:
+        self.preview.set_placeholder(self._t["preview_failed"].format(error=message))
+
+    def _on_open_current_pdf(self) -> None:
+        if self._current_pdf_path:
+            self._open_pdf({"pdf_path": self._current_pdf_path})
+
+    @staticmethod
+    def _open_pdf(hit: dict) -> None:
         from PySide6.QtGui import QDesktopServices
         from PySide6.QtCore import QUrl
 
-        hit = item.data(Qt.ItemDataRole.UserRole) or {}
         path = str(hit.get("pdf_path") or "")
         if path and os.path.isfile(path):
             QDesktopServices.openUrl(QUrl.fromLocalFile(path))
@@ -511,11 +837,13 @@ class PdfLibraryPage(PageScaffold):
             self._refresh_status()
 
     def shutdown(self) -> None:
-        for name in ("_index_worker", "_search_worker"):
+        for name in ("_index_worker", "_search_worker", "_render_worker"):
             worker = getattr(self, name, None)
             if worker is not None and worker.isRunning():
                 stop = getattr(worker, "stop", None)
                 if callable(stop):
                     stop()
+                else:
+                    worker.requestInterruption()
                 worker.wait(3000)
             setattr(self, name, None)
