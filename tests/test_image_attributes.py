@@ -75,7 +75,10 @@ class _PanelMixin:
     def install_panel(self):
         self._saved = dict(attrs._GROUP_CACHE)
         attrs._GROUP_CACHE.clear()
-        attrs._GROUP_CACHE["||"] = {
+        # Key must be the signature the service actually computes for the
+        # default test config, otherwise group_embeddings() cache-misses and
+        # tries to encode the real prompt panel.
+        attrs._GROUP_CACHE[attrs._model_signature(None)] = {
             "color": (
                 ["黑色", "白色"],
                 np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32),
@@ -151,15 +154,15 @@ class ScoringTests(_PanelMixin, unittest.TestCase):
 
 
 class ServiceRoutingTests(_PanelMixin, unittest.TestCase):
-    """search_by_query must prefer attributes over the literal scan."""
+    """search_by_query merges channels: literal evidence first, attributes fill."""
 
     def setUp(self):
         self.install_panel()
 
     @staticmethod
-    def _hit():
+    def _hit(image_id="a" * 32, match="attribute"):
         return {
-            "image_id": "a" * 32,
+            "image_id": image_id,
             "image_path": "/tmp/a.jpg",
             "rel_path": "a.jpg",
             "library_root": "/tmp",
@@ -168,22 +171,56 @@ class ServiceRoutingTests(_PanelMixin, unittest.TestCase):
             "tags": [],
             "people_count": 1,
             "score": 0.9,
-            "match": "attribute",
+            "match": match,
         }
 
-    def test_attribute_hits_short_circuit_the_literal_scan(self):
+    def test_literal_hits_outrank_attribute_hits(self):
         from src.services import image_index_service as service
 
         original_attr = service.search_by_attributes
         original_literal = service._literal_scan
-        service.search_by_attributes = lambda *a, **k: [self._hit()]  # type: ignore[assignment]
-        service._literal_scan = lambda *a, **k: self.fail("literal scan must not run")  # type: ignore[assignment]
+        service.search_by_attributes = lambda *a, **k: [self._hit("b" * 32)]  # type: ignore[assignment]
+        service._literal_scan = lambda *a, **k: [self._hit("a" * 32, match="keyword")]  # type: ignore[assignment]
         try:
             hits = service.search_by_query("浅色衣服", top_k=5)
         finally:
             service.search_by_attributes = original_attr  # type: ignore[assignment]
             service._literal_scan = original_literal  # type: ignore[assignment]
-        self.assertEqual([hit["match"] for hit in hits], ["attribute"])
+        self.assertEqual([hit["match"] for hit in hits], ["keyword", "attribute"])
+
+    def test_literal_page_full_skips_attribute_scoring(self):
+        from src.services import image_index_service as service
+
+        original_attr = service.search_by_attributes
+        original_literal = service._literal_scan
+        full = [self._hit(f"{i:032x}", match="keyword") for i in range(3)]
+        service._literal_scan = lambda *a, **k: list(full)  # type: ignore[assignment]
+        service.search_by_attributes = lambda *a, **k: self.fail(  # type: ignore[assignment]
+            "attribute scoring must not run when literal hits already fill top_k"
+        )
+        try:
+            hits = service.search_by_query("浅色衣服", top_k=3)
+        finally:
+            service.search_by_attributes = original_attr  # type: ignore[assignment]
+            service._literal_scan = original_literal  # type: ignore[assignment]
+        self.assertEqual(len(hits), 3)
+        self.assertTrue(all(hit["match"] == "keyword" for hit in hits))
+
+    def test_duplicate_ids_are_not_merged_twice(self):
+        from src.services import image_index_service as service
+
+        original_attr = service.search_by_attributes
+        original_literal = service._literal_scan
+        same = self._hit("c" * 32, match="keyword")
+        service._literal_scan = lambda *a, **k: [dict(same)]  # type: ignore[assignment]
+        service.search_by_attributes = lambda *a, **k: [dict(same, match="attribute")]  # type: ignore[assignment]
+        try:
+            hits = service.search_by_query("浅色衣服", top_k=5)
+        finally:
+            service.search_by_attributes = original_attr  # type: ignore[assignment]
+            service._literal_scan = original_literal  # type: ignore[assignment]
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(hits[0]["match"], "keyword")
 
     def test_query_without_attribute_vocabulary_is_not_scored(self):
         from src.services import image_index_service as service

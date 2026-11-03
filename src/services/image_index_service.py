@@ -583,6 +583,23 @@ def _keyword_haystack(row: Mapping[str, Any]) -> str:
     return " ".join(parts).casefold()
 
 
+# Caption/filename evidence is the VLM saying "this photo shows a 衬衫"; tags
+# and people JSON are looser metadata. Weighting the weak fields below 1 keeps
+# the two tiers from tying, so a caption match always outranks a tag-only match
+# and the pixel rerank only ever breaks ties inside one tier.
+_WEAK_FIELD_WEIGHT = 0.8
+
+
+def _literal_fields(row: Mapping[str, Any]) -> tuple[str, str]:
+    strong = " ".join(
+        [str(row.get("caption") or ""), str(row.get("rel_path") or "")]
+    ).casefold()
+    weak = " ".join(
+        [str(row.get("people_json") or ""), str(row.get("tags_json") or "")]
+    ).casefold()
+    return strong, weak
+
+
 def search_by_keyword(
     keyword: str,
     *,
@@ -726,6 +743,22 @@ def _literal_score(haystack: str, fragments: Sequence[str], latin: Sequence[str]
     return min(1.0, (best * 10.0 + extra * 3.0 + words * 5.0) / (_FRAGMENT_MAX * 10.0 + 6.0))
 
 
+def _literal_score_fields(
+    row: Mapping[str, Any], fragments: Sequence[str], latin: Sequence[str]
+) -> float:
+    """Field-aware literal score: caption/filename full weight, tags/people 0.8.
+
+    Without the split, "浅蓝色衬衫" in a VLM caption and 衬衫 buried in a tag
+    list score identically, and every hit ties at one value — the ranking then
+    depends entirely on the noisy pixel rerank. The tier gap guarantees a
+    caption match stays above a tag-only match.
+    """
+    strong, weak = _literal_fields(row)
+    score_strong = _literal_score(strong, fragments, latin)
+    score_weak = _literal_score(weak, fragments, latin) * _WEAK_FIELD_WEIGHT
+    return max(score_strong, score_weak)
+
+
 def _people_ok(hit: Mapping[str, Any], min_people: int, max_people: int) -> bool:
     count = int(hit.get("people_count") or 0)
     if min_people and count < int(min_people):
@@ -765,7 +798,7 @@ def _literal_scan(
     ]
     scored: list[dict] = []
     for row in store.iter_image_rows(config=config, columns=columns):
-        score = _literal_score(_keyword_haystack(row), fragments, latin)
+        score = _literal_score_fields(row, fragments, latin)
         if score <= 0:
             continue
         hit = _row_to_hit(row, score=score, match="keyword")
@@ -773,6 +806,8 @@ def _literal_scan(
             continue
         scored.append(hit)
     scored.sort(key=lambda hit: hit["score"], reverse=True)
+    if int(limit) <= 0:
+        return scored
     return scored[: max(1, int(limit))]
 
 
@@ -893,14 +928,14 @@ def search_by_query(
     """Search that picks the right channel for the query language.
 
     English queries (and anything without Han characters) go straight to CLIP.
-    Chinese queries are handled in three steps, cheapest signal first:
+    Chinese queries merge two channels, evidence first:
 
-    1. **attributes** -- 浅色衣服 / 肚子胖的人 need pixels, not filenames, so they
-       score stored vectors against the panel in ``image_attributes``;
-    2. **literal** -- 穿西装的男人 / 红酒瓶 usually sit in the file name itself;
+    1. **literal** -- caption / file-name matches (穿西装的男人 / 红酒瓶 / 衬衫);
+       a VLM caption that names the word is proof of a match, so these rank top;
+    2. **attribute** -- zero-shot pixel scoring against the panel in
+       ``image_attributes`` fills the rest (浅色衣服 / 肚子胖的人);
     3. **vector** -- only when neither found anything, and the UI labels those
-       results as approximate, because an English text tower embeds Han text
-       into noise.
+       results as approximate.
 
     ``min_score`` only applies to the vector channel -- the other two live on
     their own scales.
@@ -914,30 +949,57 @@ def search_by_query(
         hits = search_by_text(text, config=config, top_k=limit, min_score=min_score)
         return [hit for hit in hits if _people_ok(hit, min_people, max_people)][:limit]
 
-    attribute_hits = search_by_attributes(
-        text, config=config, top_k=limit, min_people=min_people, max_people=max_people
-    )
-    if attribute_hits:
-        # The query named an attribute, so it was a question about pixels; a
-        # filename scan would only add photos that happen to spell the word.
-        return attribute_hits
-
+    # Channels are merged, not exclusive. A photo whose VLM caption names the
+    # word (caption: 浅蓝色衬衫...) is *proof* of a match and must never be
+    # hidden because the zero-shot attribute panel happened to rank it low.
+    # Order: literal (evidence) first, then attribute (visual) fill-up.
     fragments, latin = query_terms(text)
-    hits = _literal_scan(
+    literal_hits = _literal_scan(
         fragments,
         latin,
         config=config,
-        limit=limit,
+        limit=0,  # take every literal hit; ties are reranked by pixels below
         min_people=min_people,
         max_people=max_people,
     )
-    if hits:
-        # Any literal hit means the file text actually names what was asked for.
-        # Padding with vectors here would only add noise: an English text tower
-        # scores every Chinese query at 0.28-0.32 against unrelated photos, so
-        # "more results" would mean "more wrong photos".
-        return hits
 
+    attribute_hits: list[dict] = []
+    if literal_hits:
+        # Literal hits already carry text evidence (a VLM caption naming 衬衫 is
+        # proof). Rank them by evidence strength, then recency — NOT by the CLIP
+        # zero-shot score: CLIP is unreliable for screenshots/collages (a 小红书
+        # shot of a man in a shirt scores low because it also sees the parking
+        # lot), and demoting a caption-confirmed photo by pixel noise is exactly
+        # the "搜不到" bug. Recency surfaces the editor's newest matching assets.
+        literal_hits.sort(
+            key=lambda hit: (hit["score"], float(hit.get("mtime") or 0.0)),
+            reverse=True,
+        )
+        literal_hits = literal_hits[:limit]
+        if len(literal_hits) < limit:
+            attribute_hits = search_by_attributes(
+                text, config=config, top_k=limit, min_people=min_people, max_people=max_people
+            )
+    else:
+        attribute_hits = search_by_attributes(
+            text, config=config, top_k=limit, min_people=min_people, max_people=max_people
+        )
+
+    merged: list[dict] = list(literal_hits)
+    seen_ids = {str(hit.get("image_id") or hit.get("image_path") or "") for hit in merged}
+    for hit in attribute_hits:
+        key = str(hit.get("image_id") or hit.get("image_path") or "")
+        if key in seen_ids:
+            continue
+        seen_ids.add(key)
+        merged.append(hit)
+        if len(merged) >= limit:
+            break
+    if merged:
+        return merged[:limit]
+
+    # Vector channel only when neither found anything, and the UI labels those
+    # results as approximate.
     return [
         hit
         for hit in search_by_text(text, config=config, top_k=limit, min_score=min_score)

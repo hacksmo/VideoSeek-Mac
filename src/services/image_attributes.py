@@ -178,6 +178,133 @@ GROUP_TITLES = {
     "person": "有没有人",
 }
 
+# Chinese panel for Chinese CLIP: its text tower was trained on Chinese pairs,
+# so English prompts land off-distribution (a query like 衬衫 silently scores
+# near noise). Label keys must mirror GROUPS exactly — the lexicon, the UI and
+# score_constraints all speak in these labels; only the prompts differ.
+GROUPS_ZH: dict[str, dict[str, tuple[str, ...]]] = {
+    "color": {
+        "黑色": ("一张穿着黑色衣服的人的照片",),
+        "白色": ("一张穿着白色衣服的人的照片",),
+        "浅色": (
+            "一张穿着浅色衣服的人的照片，米色、奶白、浅灰或淡彩色",
+        ),
+        "深色": (
+            "一张穿着深色衣服的人的照片，藏青、深棕或炭灰色",
+        ),
+        "彩色": (
+            "一张穿着鲜艳彩色衣服的人的照片，红色、黄色、绿色或蓝色",
+        ),
+        "印花": ("一张穿着印花、碎花或图案衣服的人的照片",),
+    },
+    "build": {
+        "偏胖": ("一张身材偏胖的人的照片", "一张有圆肚子、体型富态的人的照片"),
+        "匀称": ("一张身材匀称普通的人的照片",),
+        "偏瘦": ("一张身材偏瘦纤细的人的照片",),
+    },
+    "height": {
+        "偏矮": ("一张个子偏矮的人的全身照",),
+        "中等": ("一张身高普通的人的全身照",),
+        "偏高": ("一张个子高挑的人的全身照",),
+    },
+    "style": {
+        "花哨": (
+            "一张穿着花哨衣服的人的照片，颜色鲜艳、图案复杂、配饰很多",
+        ),
+        "素净": ("一张穿着素净纯色简单衣服的人的照片",),
+        "正装": ("一张穿着正装西服套装的人的照片",),
+        "休闲": ("一张穿着休闲街头服饰的人的照片",),
+        "老钱风": (
+            "一张穿着老钱风衣服的人的照片，低调奢华、高级天然面料、中性色调、"
+            "经典针织polo衫、剪裁西裤和乐福鞋",
+        ),
+        "工装风": (
+            "一张穿着工装风衣服的人的照片，牛仔外套或工装夹克、工装裤和靴子",
+        ),
+        "学院风": (
+            "一张穿着学院风衣服的人的照片，西装外套、针织毛衣、牛津衬衫和卡其裤",
+        ),
+        "运动风": (
+            "一张穿着运动服的人的照片，运动套装、连帽卫衣和运动鞋",
+        ),
+        "商务休闲": (
+            "一张穿着商务休闲装的人的照片，衬衫配卡其裤和西装外套，不打领带",
+        ),
+        "街头风": (
+            "一张穿着街头潮牌服饰的人的照片，印花卫衣、宽松T恤、工装裤和球鞋",
+        ),
+    },
+    "clothing": {
+        "衬衫": (
+            "一张穿着衬衫的人的照片",
+            "一张穿着有领子的扣子衬衫的人的照片",
+        ),
+        "T恤": (
+            "一张穿着短袖T恤的人的照片",
+            "一张穿着圆领T恤的人的照片",
+        ),
+        "Polo衫": (
+            "一张穿着polo衫的人的照片",
+        ),
+        "毛衣": (
+            "一张穿着针织毛衣的人的照片",
+        ),
+        "卫衣": (
+            "一张穿着连帽卫衣或圆领卫衣的人的照片",
+        ),
+        "西装外套": (
+            "一张穿着西装外套的人的照片",
+        ),
+        "夹克": (
+            "一张穿着夹克的人的照片，飞行员夹克或牛仔外套",
+        ),
+        "风衣": (
+            "一张穿着风衣的人的照片",
+        ),
+        "大衣": (
+            "一张穿着长款羊毛大衣的人的照片",
+        ),
+        "羽绒服": (
+            "一张穿着羽绒服的人的照片",
+        ),
+        "西裤": (
+            "一张穿着西裤的人的照片",
+        ),
+        "牛仔裤": (
+            "一张穿着牛仔裤的人的照片",
+        ),
+        "短裤": (
+            "一张穿着短裤的人的照片",
+        ),
+        "运动裤": (
+            "一张穿着运动裤或束脚裤的人的照片",
+        ),
+        "马甲": (
+            "一张穿着马甲背心的人的照片",
+        ),
+        "针织开衫": (
+            "一张穿着针织开衫的人的照片",
+        ),
+        "背心": (
+            "一张穿着无袖背心或吊带的人的照片",
+        ),
+    },
+    "person": {
+        "有人": ("一张人的照片，人物肖像",),
+        "无人": ("一张没有人只有物体或风景的照片",),
+    },
+}
+
+
+def groups_for(config: Any = None) -> dict[str, dict[str, tuple[str, ...]]]:
+    """Prompt panel matching the active model's language.
+
+    English panel for OpenAI CLIP (text tower is English-only); Chinese panel
+    for Chinese CLIP. Same label keys either way, so lexicon/scoring code is
+    model-agnostic.
+    """
+    return GROUPS_ZH if active_provider(config) == "chinese_clip_onnx" else GROUPS
+
 # Groups whose signal is too weak to present as fact. The UI appends a caveat
 # rather than hiding them, because "全都不给" is worse than "给了但标注不准".
 LOW_CONFIDENCE_GROUPS = frozenset({"height"})
@@ -360,9 +487,9 @@ def describe_constraints(constraints: Sequence[Constraint]) -> str:
     return " · ".join(parts)
 
 
-def _prompts() -> list[str]:
+def _prompts(config: Any = None) -> list[str]:
     seen: list[str] = []
-    for labels in GROUPS.values():
+    for labels in groups_for(config).values():
         for prompts in labels.values():
             for prompt in prompts:
                 if prompt not in seen:
@@ -370,14 +497,29 @@ def _prompts() -> list[str]:
     return seen
 
 
-def _model_signature(config: Any) -> str:
+def active_provider(config: Any = None) -> str:
+    """Provider id of the model currently selected (clip_onnx / chinese_clip_onnx / ...)."""
+    from src.storage.config_store import get_active_model_profile
+
     try:
-        embedding = (config or {}).get("embedding") or {}
-    except AttributeError:  # pragma: no cover - non-dict config
+        profile = get_active_model_profile(config=config)
+    except Exception:  # noqa: BLE001 - never fail a search on config weirdness
+        return "clip_onnx"
+    return str(profile.get("provider", "") or "").strip() or "clip_onnx"
+
+
+def _model_signature(config: Any) -> str:
+    from src.storage.config_store import get_active_model_profile
+
+    try:
+        profile = get_active_model_profile(config=config)
+    except Exception:  # noqa: BLE001
         return ""
-    if not isinstance(embedding, Mapping):
-        return ""
-    bits = [str(embedding.get(key) or "") for key in ("provider", "model_profile", "model_path")]
+    bits = [
+        str(profile.get("provider") or ""),
+        str(profile.get("id") or ""),
+        str((profile.get("runtime") or {}).get("model_variant") or ""),
+    ]
     return "|".join(bits)
 
 
@@ -385,7 +527,7 @@ def _cache_path(config: Any) -> str:
     from src.infra.paths import get_app_data_dir
 
     digest = hashlib.sha1(
-        json.dumps([_prompts(), _model_signature(config)], ensure_ascii=False).encode("utf-8")
+        json.dumps([_prompts(config), _model_signature(config)], ensure_ascii=False).encode("utf-8")
     ).hexdigest()[:16]
     folder = os.path.join(get_app_data_dir(), "cache", "attribute_prompts")
     os.makedirs(folder, exist_ok=True)
@@ -397,7 +539,7 @@ def _encode_groups(config: Any) -> dict[str, tuple[list[str], np.ndarray]]:
     from src.core.clip_embedding import get_text_embedding
 
     path = _cache_path(config)
-    prompts = _prompts()
+    prompts = _prompts(config)
     cached: dict[str, np.ndarray] = {}
     if os.path.isfile(path):
         try:
@@ -427,7 +569,7 @@ def _encode_groups(config: Any) -> dict[str, tuple[list[str], np.ndarray]]:
             logger.debug("Attribute prompt cache not written: %s", exc)
 
     groups: dict[str, tuple[list[str], np.ndarray]] = {}
-    for group, labels in GROUPS.items():
+    for group, labels in groups_for(config).items():
         names: list[str] = []
         rows: list[np.ndarray] = []
         for label, label_prompts in labels.items():
