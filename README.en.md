@@ -47,13 +47,13 @@ VideoSeek doesn't search filenames — it **understands what's in the frame**.
 
 ## One pipeline, two tools: 1 hour → 10 minutes
 
-VideoSeek is the front half of your **talking-head editing pipeline**: finding footage.
+VideoSeek is the front half of the **talking-head editing pipeline**: finding footage.
 
-Pair it with your self-built **auto talking-head cutter**, and the whole flow looks like this:
+Paired with the author's **independently developed talking-head auto-cut pipeline** (breath cutting, repetition removal, speaker separation — a standalone tool fully decoupled from this repository and not using any VideoSeek code), the whole flow looks like this:
 
 ```
 Talking-head rough cut (was ~1 hour)
-  ├─ ① Auto-cut breaths & remove repeated lines   ← self-built talking-head tool
+  ├─ ① Auto-cut breaths & remove repeated lines   ← standalone talking-head tool
   ├─ ② Find B-roll images & clips from local lib  ← VideoSeek
   └─ ③ Export
 ```
