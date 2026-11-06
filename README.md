@@ -91,6 +91,9 @@ VideoSeek 是**口播剪辑工作流**的前半段：找素材。
 
 ## 快速开始
 
+> **系统要求：Apple Silicon Mac（M1 及以上），macOS 13 Ventura 或更新。**
+> 只提供 arm64 原生构建，**不支持 Intel Mac，也不通过 Rosetta 运行**。AI 依赖（ONNX Runtime / FAISS / LanceDB）全部是 arm64 原生版本；架构装错会静默走 Rosetta、推理慢数倍且不报错。安装脚本会自动校验 Python 架构并拒绝非 arm64 解释器。
+
 1. 双击 **`install-macos.command`** 装依赖（首次 5–15 分钟）
 2. 导入模型（`openai-clip.zip` + `rapidocr-zh-understanding.zip`）
 3. 双击 **`run-macos.command`** 启动，添加素材文件夹 → 开始索引 → 搜

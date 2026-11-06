@@ -20,9 +20,12 @@ done
 PROXY_ARG=""
 [ -n "$PROXY" ] && PROXY_ARG="--proxy $PROXY"
 
-# ---------- 2. 挑选可用的 Python（3.11-3.13 优先）----------
+# ---------- 2. 挑选可用的 Python（3.11-3.13 且 arm64 原生）----------
+# 架构必须锁 arm64：onnxruntime / faiss / lancedb 等只装了 arm64 原生 wheel。
+# 若误选 x86_64 解释器（例如通过 Rosetta 安装的 Homebrew Python），整个 venv
+# 会静默走 Rosetta，AI 推理慢数倍且不会报任何错。
 py_ok() {
-  "$1" -c 'import sys; sys.exit(0 if (3,11) <= sys.version_info[:2] <= (3,13) else 1)' >/dev/null 2>&1
+  "$1" -c 'import sys, platform; sys.exit(0 if (3,11) <= sys.version_info[:2] <= (3,13) and platform.machine() == "arm64" else 1)' >/dev/null 2>&1
 }
 
 pick_python() {
@@ -48,20 +51,24 @@ pick_python() {
 
 PY="$(pick_python || true)"
 if [ -z "$PY" ]; then
-  warn "未找到 Python 3.11 - 3.13。当前 python3 = $(python3 -V 2>&1 || echo 无)"
-  die "请先安装：brew install python@3.12  （装完重新双击本脚本）"
+  if [ "$(uname -m)" != "arm64" ]; then
+    die "当前架构 $(uname -m)，本项目只支持 arm64 原生。若你用的是 Apple Silicon 却看到此提示，说明终端正以 Rosetta 运行：请在「终端 → 显示简介」取消勾选「使用 Rosetta 打开」后重试"
+  fi
+  warn "未找到 Python 3.11 - 3.13 的 arm64 原生版本。当前 python3 = $(python3 -V 2>&1 || echo 无)"
+  die "请先安装：brew install python@3.13（确认 Homebrew 是 /opt/homebrew 的 arm64 版），装完重新双击本脚本"
 fi
 
-# ---------- 3. 虚拟环境（版本不符则重建）----------
+# ---------- 3. 虚拟环境（版本或架构不符则重建）----------
 say "环境"
 echo "项目目录 : $(pwd)"
 echo "Python   : $PY ($("$PY" -V 2>&1), $("$PY" -c 'import platform;print(platform.machine())'))"
+echo "架构     : $(uname -m)（要求 arm64 原生）"
 echo "虚拟环境 : $VENV"
 echo "镜像     : $MIRROR"
 if [ -n "$PROXY" ]; then echo "代理     : $PROXY"; else echo "代理     : 未检测到，走直连"; fi
 
 if [ -x "$VENV/bin/python" ] && ! py_ok "$VENV/bin/python"; then
-  warn "已有虚拟环境 Python 版本不兼容，正在重建..."
+  warn "已有虚拟环境的 Python 版本或架构不兼容（非 3.11-3.13 / 非 arm64），正在重建..."
   rm -rf "$VENV"
 fi
 

@@ -19,6 +19,13 @@ if ! "$VENV/bin/python" -c 'import sys; sys.exit(0 if (3,11) <= sys.version_info
   exit 1
 fi
 
+if [ "$("$VENV/bin/python" -c 'import platform;print(platform.machine())' 2>/dev/null)" != "arm64" ]; then
+  echo "虚拟环境不是 arm64 原生，本项目不支持 Intel Mac / Rosetta 运行。"
+  echo "请重新双击「install-macos.command」重建 arm64 环境。"
+  read -r -n 1 -p "按任意键退出..."
+  exit 1
+fi
+
 # macOS: python-vlc 需要指向 VLC.app 内的 libvlc（无 VLC 时预览播放不可用，其余功能正常）
 VLC_APP="/Applications/VLC.app"
 if [ -d "$VLC_APP" ]; then

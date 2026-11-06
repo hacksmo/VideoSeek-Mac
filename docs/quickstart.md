@@ -11,9 +11,9 @@
 
 | 依赖 | 要求 | 检查 |
 |------|------|------|
-| macOS | 13 Ventura 及以上（Apple Silicon 实测通过） | `sw_vers` |
+| macOS | **Apple Silicon (arm64) 原生**，13 Ventura 及以上；不支持 Intel Mac / Rosetta | `uname -m` → `arm64` |
 | 命令行工具 | 提供 `git`、`clang` | `xcode-select -p` |
-| Python | **3.11 – 3.13**，推荐 3.13 arm64 | `python3 -V` |
+| Python | **3.11 – 3.13，必须是 arm64 原生**，推荐 3.13 | `python3 -V` |
 | FFmpeg | 任意近期版本，Homebrew 装即可 | `ffmpeg -version` |
 | VLC | 可选，仅影响预览播放 | `ls /Applications/VLC.app` |
 
@@ -30,8 +30,11 @@ wheel。解释器版本不对时 pip 会直接报 `from versions: none`，看起
 ```bash
 # 自查：确认 python3 到底指向哪一个
 which -a python3
+uname -m                                                                        # 必须是 arm64
 /opt/homebrew/bin/python3.13 -c 'import platform; print(platform.machine())'   # 期望 arm64
 ```
+
+**如果 `uname -m` 返回 `x86_64` 但你的机器是 Apple Silicon**：终端正运行在 Rosetta 下。在「终端 → 显示简介」里取消勾选「使用 Rosetta 打开」，重开终端再装。安装脚本会自动拒绝非 arm64 的解释器，避免装出一套静默降速的 Rosetta 环境。
 
 ## 2) 安装依赖
 

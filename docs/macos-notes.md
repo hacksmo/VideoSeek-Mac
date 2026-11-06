@@ -193,7 +193,7 @@ git merge upstream/master
 | OCR 模型 | `rapidocr-zh`，det 4.5 MB / rec 10 MB / cls 0.5 MB |
 | 自检 | `model_ready` / `ffmpeg_ready` / `resources_ready` 均为 True |
 
-Intel Mac 未实测。理论上只要 Python 版本合规、依赖有 x86_64 wheel 就能跑，欢迎反馈。
+只支持 Apple Silicon (arm64)。`install-macos.command` 会校验 `platform.machine() == "arm64"`，`run-macos.command` 也会拒绝非 arm64 的虚拟环境。Intel Mac / Rosetta 明确不支持：依赖只装 arm64 原生 wheel，x86_64 下 ONNX 推理与向量检索性能不可接受。
 
 <a id="test-baseline"></a>
 

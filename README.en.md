@@ -91,6 +91,9 @@ Talking-head rough cut (was ~1 hour)
 
 ## Quick start
 
+> **Requirements: an Apple Silicon Mac (M1 or later), macOS 13 Ventura or newer.**
+> arm64 native only — **Intel Macs are not supported, and running under Rosetta is not supported.** The AI stack (ONNX Runtime / FAISS / LanceDB) ships arm64-native wheels; the wrong architecture silently falls back to Rosetta and runs several times slower without any error. The installer validates the Python architecture and rejects non-arm64 interpreters.
+
 1. Double-click **`install-macos.command`** to install dependencies (5–15 min first run)
 2. Import models (`openai-clip.zip` + `rapidocr-zh-understanding.zip`)
 3. Double-click **`run-macos.command`**, add asset folders → start indexing → search
