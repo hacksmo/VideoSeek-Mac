@@ -1,3 +1,11 @@
+> **Archived (2026-11-06)**: This branch is no longer maintained. It stays
+> public and read-only, and the source remains available under **AGPL-3.0**.
+> Further work on local asset tooling has moved to a separate project designed
+> from an empty repository and rewritten natively in Swift, with no shared code.
+> Thanks to upstream [6v17/VideoSeek](https://github.com/6v17/VideoSeek).
+
+---
+
 # VideoSeek — The video editor's asset search engine
 
 > **A local asset search engine for video editors**: describe a shot in one sentence and find the right clip or image in your local library within a minute. Everything runs locally — your media is never uploaded.
