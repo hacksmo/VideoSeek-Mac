@@ -134,14 +134,3 @@ This project is built on [6v17/VideoSeek](https://github.com/6v17/VideoSeek) by 
 
 </details>
 
-## Support this project
-
-If it saves you time, feel free to buy me a coffee:
-
-<p align="center">
-  <img src="docs/assets/donate-card.png" alt="Buy me a coffee - WeChat / Alipay" width="520">
-</p>
-
-<p align="center">
-  Left: WeChat　Right: Alipay
-</p>
